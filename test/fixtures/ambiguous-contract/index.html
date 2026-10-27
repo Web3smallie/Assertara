@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DAO Governance - Upgrade Protocol</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b0f19; color: #e2e8f0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+    .card { background: #1a2234; border: 1px solid #2d3748; border-radius: 16px; padding: 28px; width: 440px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h2 { font-size: 20px; margin: 0 0 12px; }
+    p { color: #a0aec0; font-size: 14px; line-height: 1.5; }
+    .btn { background: #6366f1; color: white; border: none; border-radius: 12px; padding: 14px; width: 100%; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 20px; }
+    .btn:hover { background: #4f46e5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Governance Proposal #42</h2>
+    <p>Vote to execute Protocol Module V2 deployment on proxy implementation contract.</p>
+    <button class="btn" onclick="triggerAmbiguousTx()">Cast Governance Vote</button>
+  </div>
+
+  <script>
+    async function triggerAmbiguousTx() {
+      const txPayload = {
+        from: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+        to: "0x1234567890123456789012345678901234567890", // Unverified custom contract
+        data: "0x79c65092000000000000000000000000000000000000000000000000000000000000002a", // Custom unindexed selector
+        value: "0x0"
+      };
+
+      if (window.ethereum) {
+        window.ethereum.request({ method: 'eth_sendTransaction', params: [txPayload] });
+      } else {
+        alert("Ambiguous transaction dispatched to unverified proxy contract.");
+      }
+    }
+  </script>
+</body>
+</html>

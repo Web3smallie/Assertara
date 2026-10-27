@@ -1,0 +1,11 @@
+```powershell
+@'
+.env
+.env.*
+!.env.example
+node_modules/
+coverage/
+.DS_Store
+Thumbs.db
+'@ | Set-Content -Encoding utf8 .gitignore
+```

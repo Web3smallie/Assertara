@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assertara</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="brand">
+    <span class="brand-mark" aria-hidden="true">A</span>
+    <div>
+      <h1>Assertara</h1>
+      <p class="tagline">Advisory Web3 transaction security</p>
+    </div>
+    <span id="backendStatus" class="backend-status unknown" title="Local backend status">…</span>
+  </header>
+
+  <section class="page-card" aria-label="Current page">
+    <div class="page-domain" id="pageDomain">—</div>
+    <div class="page-url" id="pageUrl">—</div>
+    <div class="page-title" id="pageTitle">—</div>
+  </section>
+
+  <section id="formSection" aria-label="Transaction to inspect">
+    <h2>Transaction to inspect</h2>
+    <p class="hint">Assertara cannot read your wallet. Paste the transaction your wallet is asking you to authorize, or load a demo.</p>
+    <label>To (required)
+      <input id="txTo" type="text" spellcheck="false" placeholder="0x…" autocomplete="off">
+    </label>
+    <label>Calldata
+      <textarea id="txData" rows="2" spellcheck="false" placeholder="0x…"></textarea>
+    </label>
+    <div class="row">
+      <label>Value (wei hex)
+        <input id="txValue" type="text" spellcheck="false" placeholder="0x0" autocomplete="off">
+      </label>
+      <label>From (optional)
+        <input id="txFrom" type="text" spellcheck="false" placeholder="0x…" autocomplete="off">
+      </label>
+    </div>
+    <div class="demo-row" aria-label="Demo transactions">
+      <button class="demo-btn" data-demo="phishing" type="button">Demo: airdrop claim</button>
+      <button class="demo-btn" data-demo="swap" type="button">Demo: DEX swap</button>
+      <button class="demo-btn" data-demo="ambiguous" type="button">Demo: unknown contract</button>
+    </div>
+    <p class="manual-note" id="txSourceNote">Transaction source: <strong>manual entry</strong> — verify every field against your wallet.</p>
+    <button id="inspectBtn" class="primary" type="button">Inspect Transaction</button>
+    <div id="formError" class="error hidden" role="alert"></div>
+  </section>
+
+  <section id="loadingSection" class="hidden" aria-label="Evaluation in progress">
+    <div class="spinner" aria-hidden="true"></div>
+    <p id="loadingText">Collecting page evidence…</p>
+  </section>
+
+  <section id="errorSection" class="hidden" aria-label="Evaluation error">
+    <div class="error-card">
+      <h2>Evaluation failed</h2>
+      <p id="errorText"></p>
+      <button id="retryBtn" type="button">Back to form</button>
+    </div>
+  </section>
+
+  <section id="resultSection" class="hidden" aria-label="Evaluation result">
+    <div id="verdictBadge" class="verdict-badge">—</div>
+    <p id="resultSummary" class="summary"></p>
+    <dl class="facts">
+      <div><dt>Confidence</dt><dd id="resultConfidence">—</dd></div>
+      <div><dt>Contract</dt><dd id="resultContract">—</dd></div>
+      <div><dt>Function</dt><dd id="resultFunction">—</dd></div>
+      <div><dt>Recommended action</dt><dd id="resultAction">—</dd></div>
+    </dl>
+    <p id="evidenceNote" class="evidence-note"></p>
+    <div class="row">
+      <button id="overlayBtn" type="button">Show on page</button>
+      <button id="newBtn" type="button">New inspection</button>
+    </div>
+  </section>
+
+  <footer>
+    <p>Advisory only — a MATCH verdict indicates visual alignment, not safety. Keys stay on the local backend.</p>
+  </footer>
+
+  <script src="../shared/format.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

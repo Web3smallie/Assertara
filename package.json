@@ -1,0 +1,23 @@
+{
+  "name": "assertara",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/unit/decoder.test.js && node test/unit/samSchema.test.js && node test/unit/reasoner.test.js && node test/unit/extension.test.js && node test/unit/evaluate.test.js",
+    "probe": "node src/scripts/probeMetaApi.js",
+    "start": "node src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "sharp": "^0.35.5",
+    "tesseract.js": "^7.0.0",
+    "viem": "^2.57.12"
+  }
+}
