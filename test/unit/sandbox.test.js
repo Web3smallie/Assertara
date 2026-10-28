@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { submitHarnessRun } = require('../../src/agent/harness');
 const { runTool } = require('../../src/agent/toolRegistry');
-const { verifySandbox, createSandboxExecutor } = require('../../src/agent/sandbox');
+const { verifySandbox, createSandboxExecutor, buildRunArgv } = require('../../src/agent/sandbox');
 
 // ---- Injected runtime doubles ----
 // Every test below injects spawnFn: no real container runtime is touched.
@@ -178,7 +178,10 @@ async function runSandboxTests() {
     assert.ok(!argv.some((a, i) => i > 1 && a === 'pull'), 'no pull subcommand anywhere');
     const imgAt = argv.indexOf(IMAGE);
     assert.ok(imgAt !== -1, 'pinned image used');
-    assert.deepStrictEqual(argv.slice(imgAt + 1), ['forge', 'test', '--match-test', 'testPoc'], 'entry forwarded as argv, unmodified');
+    assert.ok(has('--entrypoint', 'forge'), 'image ENTRYPOINT overridden with the validated tool');
+    assert.ok(argv.indexOf('--entrypoint') < imgAt, 'entrypoint flag precedes the image');
+    assert.deepStrictEqual(argv.slice(imgAt + 1), ['test', '--match-test', 'testPoc'], 'args forwarded as argv, unmodified');
+    assert.ok(!argv.includes('/bin/sh'), 'no shell binary in argv');
     assert.ok(!argv.some((a) => /[;&|`$]/.test(a) && a !== argv[argv.indexOf('--tmpfs') + 1]), 'no shell metachar assembly');
     console.log('✔ Test 5 Passed: Every restriction present; entry forwarded argv-only.');
   }
@@ -428,6 +431,53 @@ async function runSandboxTests() {
     assert.strictEqual(viaTool.status, 'EXECUTION_UNAVAILABLE', 'tool path cannot pass operator sandbox config');
     assert.strictEqual(viaTool.sandbox, undefined);
     console.log('✔ Test 15 Passed: Static lane clean; tool path cannot enable sandbox.');
+  }
+
+  // Test 17: the image ENTRYPOINT is overridden so the command executes
+  // directly with no shell. Placed before T16 (which stays last) because
+  // T16's live negative is environment-sensitive. E.g.
+  // ghcr.io/foundry-rs/foundry ships ENTRYPOINT ["/bin/sh","-c"], which
+  // would otherwise swallow every argument after the image name.
+  {
+    const root = tempRoot();
+    const ws = path.join(root, 'h_entry1');
+    fs.mkdirSync(ws, { recursive: true });
+    const spawnFn = healthyHandler();
+    const check = await verifySandbox({ runtime: 'docker', image: IMAGE, workspaceRoot: root, spawnFn });
+    assert.strictEqual(check.ok, true);
+    // Object-form entry: the tool becomes --entrypoint, args trail the image.
+    await check.executor.run({ workspaceDir: ws, entry: { tool: 'forge', args: ['--version'] }, timeoutMs: 1000 });
+    let argv = runArgv(spawnFn.calls);
+    let imgAt = argv.indexOf(IMAGE);
+    let epAt = argv.indexOf('--entrypoint');
+    assert.ok(epAt !== -1, '--entrypoint override present');
+    assert.strictEqual(argv[epAt + 1], 'forge', 'entrypoint is the validated tool');
+    assert.ok(epAt < imgAt, 'entrypoint flag precedes the image');
+    assert.deepStrictEqual(argv.slice(imgAt + 1), ['--version'], 'args trail the image verbatim');
+    assert.ok(!argv.includes('/bin/sh'), 'no shell binary anywhere in argv');
+    assert.ok(!argv.some((a) => a === '-c'), 'no shell -c anywhere in argv');
+    // Args carrying spaces and shell metacharacters survive as single tokens
+    // (a shell would split or expand them).
+    const tricky = ['test', '--match-test', 'a b;c|d$e`f"g'];
+    await check.executor.run({ workspaceDir: ws, entry: { tool: 'forge', args: tricky }, timeoutMs: 1000 });
+    const runs = spawnFn.calls.filter((a) => a[1] === 'run');
+    assert.strictEqual(runs.length, 2);
+    argv = runs[1];
+    imgAt = argv.indexOf(IMAGE);
+    assert.deepStrictEqual(argv.slice(imgAt + 1), tricky, 'metachar args pass through unsplit, unexpanded');
+    assert.strictEqual(argv[argv.indexOf('--entrypoint') + 1], 'forge');
+    // Single-token entries run with no trailing args.
+    await check.executor.run({ workspaceDir: ws, entry: ['true'], timeoutMs: 1000 });
+    argv = spawnFn.calls.filter((a) => a[1] === 'run')[2];
+    imgAt = argv.indexOf(IMAGE);
+    assert.strictEqual(argv[argv.indexOf('--entrypoint') + 1], 'true');
+    assert.deepStrictEqual(argv.slice(imgAt + 1), [], 'bare entrypoint, no trailing args');
+    // buildRunArgv rejects an empty entry directly (defense in depth).
+    assert.throws(
+      () => buildRunArgv({ runtime: 'docker', image: IMAGE, workspaceDir: ws, entry: [], limits: undefined, containerName: 'x' }),
+      (e) => e.code === 'SANDBOX_COMMAND'
+    );
+    console.log('✔ Test 17 Passed: Entrypoint overridden; command executes directly, no shell.');
   }
 
   // Test 16: unavailable states are never success-shaped; real negative probe here.

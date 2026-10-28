@@ -220,6 +220,15 @@ function requirementsFor(stage) {
 
 function buildRunArgv({ runtime, image, workspaceDir, entry, limits, containerName }) {
   const L = { ...DEFAULT_LIMITS, ...(limits || {}) };
+  // The entry's first token becomes the container entrypoint, overriding any
+  // ENTRYPOINT baked into the image (e.g. ["/bin/sh","-c"], which would
+  // otherwise swallow every argument after the image name). The command then
+  // executes directly: no shell exists anywhere on this path.
+  if (!Array.isArray(entry) || entry.length === 0 ||
+      entry.some((a) => typeof a !== 'string' || a.length === 0 || a.includes('\0'))) {
+    throw sandboxError('SANDBOX_COMMAND', 'sandbox: entry must be a non-empty argv array of strings');
+  }
+  const [entrypoint, ...cmdArgs] = entry;
   const argv = [
     runtime, 'run', '--rm',
     '--pull', 'never',
@@ -235,8 +244,9 @@ function buildRunArgv({ runtime, image, workspaceDir, entry, limits, containerNa
     '--name', containerName,
     '-v', `${workspaceDir}:/work`,
     '--workdir', '/work',
+    '--entrypoint', entrypoint,
     image,
-    ...entry,
+    ...cmdArgs,
   ];
   // Self-check: every mandatory restriction must be present verbatim.
   for (let i = 0; i < REQUIRED_FLAGS.length; i += 2) {
@@ -252,6 +262,10 @@ function buildRunArgv({ runtime, image, workspaceDir, entry, limits, containerNa
     if (at === -1 || (want !== null && argv[at + 1] !== want)) {
       throw sandboxError('SANDBOX_INTERNAL', `sandbox: mandatory restriction missing from run argv (${flag})`);
     }
+  }
+  const epAt = argv.indexOf('--entrypoint');
+  if (epAt === -1 || argv[epAt + 1] !== entrypoint) {
+    throw sandboxError('SANDBOX_INTERNAL', 'sandbox: entrypoint override missing from run argv');
   }
   if (argv.some((a, i) => i > 1 && a === 'pull')) throw sandboxError('SANDBOX_INTERNAL', 'sandbox: image pull is never permitted at run time');
   return argv;
