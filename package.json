@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node test/unit/decoder.test.js && node test/unit/samSchema.test.js && node test/unit/reasoner.test.js && node test/unit/extension.test.js && node test/unit/evaluate.test.js",
+    "test": "node test/unit/decoder.test.js && node test/unit/samSchema.test.js && node test/unit/reasoner.test.js && node test/unit/extension.test.js && node test/unit/evaluate.test.js && node test/unit/agent.test.js && node test/unit/scheduler.test.js && node test/unit/pdfIngest.test.js && node test/unit/harness.test.js && node test/unit/sandbox.test.js && node test/unit/audioIngest.test.js && node test/unit/history.test.js && node test/unit/dossier.test.js && node test/unit/askAbout.test.js && node test/unit/auditAssess.test.js && node test/unit/videoIngest.test.js && node test/unit/localize.test.js && node test/unit/replay.test.js && node test/unit/readiness.test.js && node test/unit/hardening.test.js && node test/unit/modelDriver.test.js",
     "probe": "node src/scripts/probeMetaApi.js",
     "start": "node src/server.js"
   },
@@ -18,6 +18,7 @@
     "express": "^5.3.0",
     "sharp": "^0.35.5",
     "tesseract.js": "^7.0.0",
+    "unpdf": "^1.9.1",
     "viem": "^2.57.12"
   }
 }

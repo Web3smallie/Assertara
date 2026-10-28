@@ -159,6 +159,7 @@
     parts.push(meta.screenshotIncluded ? 'Screenshot: captured.' : 'Screenshot: unavailable — page context only.');
     parts.push(`Page text collected: ${meta.visibleTextChars || 0} chars.`);
     parts.push(`Source: ${meta.txSource === 'demo' ? 'labeled demo transaction' : 'manually supplied — verify against your wallet'}.`);
+    parts.push(`Analysis: ${F.reasoningOriginLabel(evidence.reasoningOrigin)}.`);
     $('evidenceNote').textContent = parts.join(' ');
     showOnly('resultSection');
   }

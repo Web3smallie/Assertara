@@ -12,8 +12,63 @@ const config = require('../config/env');
 
 const SIMULATION_DIR = path.resolve(__dirname, '../../test/simulations');
 
+// Input bounds for generated-Solidity interpolation. Values are validated by
+// strict allowlist charset BEFORE any source is generated: 0x addresses must
+// be exactly 42 hex chars, calldata must be 0x hex within the byte cap.
+// Charset restriction (not escaping) is what makes interpolation into the
+// `address constant` and `hex"..."` contexts structurally safe — a validated
+// value cannot contain quotes, semicolons, newlines, or comments.
+const MAX_CALLDATA_BYTES = 131072; // 128KB of calldata (256KB hex chars)
+
+function simValidationError(detail) {
+  const err = new Error(`SIM_VALIDATION: ${detail}`);
+  err.code = 'SIM_VALIDATION';
+  return err;
+}
+
+function requireAddress(value, field, { optional = false } = {}) {
+  if ((value === undefined || value === null || value === '') && optional) return null;
+  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value)) {
+    throw simValidationError(`"${field}" must be a 0x address (42 hex chars); got ${typeof value === 'string' ? JSON.stringify(value.slice(0, 60)) : typeof value}`);
+  }
+  return value;
+}
+
+function requireCalldata(value) {
+  if (value === undefined || value === null) return '0x'; // native transfer: no calldata
+  if (typeof value !== 'string' || !/^0x([0-9a-fA-F]{2})*$/.test(value)) {
+    throw simValidationError(`"data" must be 0x hex bytes; got ${typeof value === 'string' ? JSON.stringify(value.slice(0, 60)) : typeof value}`);
+  }
+  const bytes = (value.length - 2) / 2;
+  if (bytes > MAX_CALLDATA_BYTES) {
+    throw simValidationError(`"data" exceeds ${MAX_CALLDATA_BYTES} bytes (${bytes} supplied)`);
+  }
+  return value;
+}
+
 /**
- * Generates a dynamic Solidity test contract simulating the transaction
+ * Validate every caller-influenced value before source generation. Covers
+ * the raw request fields AND the decoded fields re-interpolated below
+ * (spender/operator come from calldata parsing and are re-checked rather
+ * than trusted). Throws SIM_VALIDATION on any defect.
+ */
+function validateSimulationInputs({ from, to, data, decodedTx }) {
+  if (!decodedTx || typeof decodedTx !== 'object') throw simValidationError('decodedTx object is required');
+  const safeTo = requireAddress(to, 'to');
+  const safeFrom = requireAddress(from, 'from', { optional: true });
+  const safeData = requireCalldata(data);
+  const params = (decodedTx && decodedTx.parameters) || {};
+  for (const field of ['spender', 'operator']) {
+    if (params[field] !== undefined && params[field] !== null) {
+      requireAddress(params[field], `decodedTx.parameters.${field}`);
+    }
+  }
+  return { from: safeFrom, to: safeTo, data: safeData };
+}
+
+/**
+ * Generates a dynamic Solidity test contract simulating the transaction.
+ * Precondition: inputs passed validateSimulationInputs (allowlist charset).
  */
 function generateFoundryTestContract({ victimAddress, tokenAddress, spenderAddress, calldataHex, testId }) {
   return `// SPDX-License-Identifier: MIT
@@ -60,6 +115,22 @@ contract SimulateTxTest_${testId} is Test {
  * Executes a simulated transaction using Foundry
  */
 async function simulateTransactionWithFoundry({ from, to, data, decodedTx }) {
+  // Validate BEFORE any source generation or file write. Malformed input is
+  // a structured FAILED result — never a compile attempt, and compilation
+  // failure elsewhere is never treated as validation.
+  let safe;
+  try {
+    safe = validateSimulationInputs({ from, to, data, decodedTx });
+  } catch (err) {
+    return {
+      status: 'FAILED',
+      executed: false,
+      success: false,
+      mode: 'failed',
+      error: String(err.message).slice(0, 300),
+      reason: 'Input validation failed before any source generation; nothing was compiled or executed.'
+    };
+  }
   const isApproval = decodedTx.functionName === 'approve' || decodedTx.functionName === 'increaseAllowance';
   const spender = decodedTx.parameters?.spender || decodedTx.parameters?.operator;
 
@@ -72,10 +143,10 @@ async function simulateTransactionWithFoundry({ from, to, data, decodedTx }) {
   }
 
   const testCode = generateFoundryTestContract({
-    victimAddress: from,
-    tokenAddress: to,
+    victimAddress: safe.from,
+    tokenAddress: safe.to,
     spenderAddress: spender,
-    calldataHex: data,
+    calldataHex: safe.data,
     testId
   });
 
@@ -172,5 +243,7 @@ async function simulateTransactionWithFoundry({ from, to, data, decodedTx }) {
 
 module.exports = {
   simulateTransactionWithFoundry,
-  generateFoundryTestContract
+  generateFoundryTestContract,
+  validateSimulationInputs,
+  MAX_CALLDATA_BYTES
 };

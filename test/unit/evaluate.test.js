@@ -59,6 +59,14 @@ const SIM_DECODED = {
   parameters: { spender: '0x942c733fa43900388424a1bf7f94d934b3531b23', amount: '100' },
   isUnlimitedApproval: false
 };
+// Well-formed simulation input (Phase 14: malformed inputs are rejected by
+// validation before reaching the toolchain, so toolchain-path tests use
+// valid addresses/data).
+const VALID_SIM_TX = {
+  from: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
+  to: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+  data: '0x095ea7b3'
+};
 
 async function runEvaluateTests() {
   console.log('Testing Evaluate Pipeline: Context, Provenance & Simulation Honesty...\n');
@@ -180,13 +188,16 @@ async function runEvaluateTests() {
   }
 
   // Test 9: forge failure degrades to an honest FALLBACK (never executed:true).
+  // Valid inputs reach the toolchain; malformed inputs are rejected by
+  // validation before any source generation (Phase 14 contract change:
+  // FALLBACK must never substitute for input validation).
   {
     const enoent = loadSimulatorWithExec((cmd, opts, cb) => {
       const err = new Error('spawn forge ENOENT');
       err.code = 'ENOENT';
       cb(err, '', '');
     });
-    const r1 = await enoent.simulateTransactionWithFoundry({ from: '0x1', to: '0x2', data: '0x', decodedTx: SIM_DECODED });
+    const r1 = await enoent.simulateTransactionWithFoundry({ ...VALID_SIM_TX, decodedTx: SIM_DECODED });
     assert.strictEqual(r1.status, 'FALLBACK');
     assert.strictEqual(r1.executed, false, 'Fallback must not report executed:true');
     assert.strictEqual(r1.success, false, 'Fallback must not report success');
@@ -197,10 +208,15 @@ async function runEvaluateTests() {
     const compileFail = loadSimulatorWithExec((cmd, opts, cb) => {
       cb(new Error('Command failed: forge test'), '', 'Compiler error: Source "forge-std/Test.sol" not found');
     });
-    const r2 = await compileFail.simulateTransactionWithFoundry({ from: '0x1', to: '0x2', data: '0x', decodedTx: SIM_DECODED });
+    const r2 = await compileFail.simulateTransactionWithFoundry({ ...VALID_SIM_TX, decodedTx: SIM_DECODED });
     assert.strictEqual(r2.status, 'FALLBACK');
     assert.strictEqual(r2.executed, false);
     assert.ok(r2.error.includes('forge-std'), 'Fallback must surface the real underlying error');
+
+    const r3 = await compileFail.simulateTransactionWithFoundry({ from: '0x1', to: '0x2', data: '0x', decodedTx: SIM_DECODED });
+    assert.strictEqual(r3.status, 'FAILED', 'Malformed addresses must fail validation, not fall back');
+    assert.ok(r3.error.includes('SIM_VALIDATION'));
+    assert.strictEqual(r3.executed, false);
     console.log('✔ Test 9 Passed: Forge failures degrade to an honest FALLBACK.');
   }
 
@@ -212,7 +228,7 @@ async function runEvaluateTests() {
       err.signal = 'SIGTERM';
       cb(err, '', '');
     });
-    const res = await sim.simulateTransactionWithFoundry({ from: '0x1', to: '0x2', data: '0x', decodedTx: SIM_DECODED });
+    const res = await sim.simulateTransactionWithFoundry({ ...VALID_SIM_TX, decodedTx: SIM_DECODED });
     assert.strictEqual(res.status, 'FAILED');
     assert.strictEqual(res.executed, false);
     assert.strictEqual(res.success, false);
@@ -225,7 +241,7 @@ async function runEvaluateTests() {
     const sim = loadSimulatorWithExec((cmd, opts, cb) => {
       cb(null, '[PASS] test_simulate_execution() (gas: 12345)\nSuite result: ok. 1 passed; 0 failed', '');
     });
-    const res = await sim.simulateTransactionWithFoundry({ from: '0x1', to: '0x2', data: '0x', decodedTx: SIM_DECODED });
+    const res = await sim.simulateTransactionWithFoundry({ ...VALID_SIM_TX, decodedTx: SIM_DECODED });
     assert.strictEqual(res.status, 'EXECUTED');
     assert.strictEqual(res.executed, true);
     assert.strictEqual(res.success, true);
@@ -235,7 +251,7 @@ async function runEvaluateTests() {
     const simEsc = loadSimulatorWithExec((cmd, opts, cb) => {
       cb(null, '[PASS] test_simulate_execution() (gas: 1)\nALLOWANCE_ESCALATION: 999', '');
     });
-    const resEsc = await simEsc.simulateTransactionWithFoundry({ from: '0x1', to: '0x2', data: '0x', decodedTx: SIM_DECODED });
+    const resEsc = await simEsc.simulateTransactionWithFoundry({ ...VALID_SIM_TX, decodedTx: SIM_DECODED });
     assert.strictEqual(resEsc.escalationDetected, true, 'Escalation marker must be detected');
     console.log('✔ Test 11 Passed: Exit 0 reports genuine EXECUTED success.');
   }
@@ -245,7 +261,7 @@ async function runEvaluateTests() {
     const sim = loadSimulatorWithExec((cmd, opts, cb) => {
       cb(new Error('Command failed: forge test'), '[FAIL: Transaction call failed] test_simulate_execution() (gas: 999)', '');
     });
-    const res = await sim.simulateTransactionWithFoundry({ from: '0x1', to: '0x2', data: '0x', decodedTx: SIM_DECODED });
+    const res = await sim.simulateTransactionWithFoundry({ ...VALID_SIM_TX, decodedTx: SIM_DECODED });
     assert.strictEqual(res.status, 'EXECUTED');
     assert.strictEqual(res.executed, true, 'An on-chain failure still executed');
     assert.strictEqual(res.success, false, 'An on-chain failure must not report success');

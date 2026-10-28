@@ -84,6 +84,7 @@
     const decoded = evidence.decodedTransaction || {};
     const facts = el('dl', 'facts');
     facts.appendChild(factRow('Confidence', F.formatConfidence(evidence.confidence)));
+    facts.appendChild(factRow('Analysis', F.reasoningOriginLabel(evidence.reasoningOrigin)));
     facts.appendChild(factRow('Contract', decoded.contractName
       ? `${decoded.contractName} (${F.shortAddress(decoded.contract)})`
       : F.shortAddress(decoded.contract)));

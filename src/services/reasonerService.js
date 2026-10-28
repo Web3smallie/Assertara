@@ -47,7 +47,8 @@ function fallbackHeuristicReasoner(visualText, pageContext, decodedTx) {
           actualExecution: `Grant unlimited allowance to spender ${decodedTx.parameters?.spender || decodedTx.parameters?.operator || 'unknown'}`,
           criticalMismatch: true
         },
-        recommendedAction: 'BLOCK_TRANSACTION'
+        recommendedAction: 'BLOCK_TRANSACTION',
+        origin: 'heuristic-fallback'
       };
     }
   }
@@ -64,7 +65,8 @@ function fallbackHeuristicReasoner(visualText, pageContext, decodedTx) {
           actualExecution: `Call ${fn} on ${decodedTx.contractName}`,
           criticalMismatch: false
         },
-        recommendedAction: 'PROCEED_WITH_CAUTION'
+        recommendedAction: 'PROCEED_WITH_CAUTION',
+        origin: 'heuristic-fallback'
       };
     }
   }
@@ -80,7 +82,8 @@ function fallbackHeuristicReasoner(visualText, pageContext, decodedTx) {
         actualExecution: `Execute unparsed function ${decodedTx.parameters?.selector || 'unknown'}`,
         criticalMismatch: false
       },
-      recommendedAction: 'VERIFY_RECIPIENT'
+      recommendedAction: 'VERIFY_RECIPIENT',
+      origin: 'heuristic-fallback'
     };
   }
 
@@ -93,7 +96,8 @@ function fallbackHeuristicReasoner(visualText, pageContext, decodedTx) {
       actualExecution: `${decodedTx.contractName}.${fn}`,
       criticalMismatch: false
     },
-    recommendedAction: 'PROCEED_WITH_CAUTION'
+    recommendedAction: 'PROCEED_WITH_CAUTION',
+    origin: 'heuristic-fallback'
   };
 }
 
@@ -148,6 +152,7 @@ Compare the visual intent against the transaction execution facts. Return strict
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
     const parsed = JSON.parse(content);
+    parsed.origin = 'model';
     return parsed;
   } catch (err) {
     console.warn(`[Muse Spark Error] Reasoning failed: ${err.message}. Using fallback.`);

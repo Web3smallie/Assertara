@@ -47,6 +47,12 @@
     return `${d.asset || 'asset'} ${d.type || ''} ${d.delta || ''} (${d.risk || 'unknown risk'})`.trim();
   }
 
+  function reasoningOriginLabel(origin) {
+    if (origin === 'model') return 'Muse Spark analysis';
+    if (origin === 'heuristic-fallback') return 'Heuristic fallback (model unavailable — unverified)';
+    return 'Reasoning source unknown';
+  }
+
   function simulationStatus(simulation) {
     const status = simulation && simulation.status;
     if (status === 'EXECUTED') {
@@ -73,6 +79,7 @@
     shortAddress,
     isValidAddress,
     formatConfidence,
+    reasoningOriginLabel,
     simulationStatus
   };
 })();

@@ -31,6 +31,9 @@ function compileEvidenceBundle({
     confidence: reasoningResult.confidence || 0.5,
     summary: reasoningResult.summary || 'Transaction analysis complete.',
     recommendedAction: reasoningResult.recommendedAction || null,
+    // Provenance: 'model' (Muse Spark) vs 'heuristic-fallback'
+    // (deterministic rules; unverified interpretation, never observed fact).
+    reasoningOrigin: reasoningResult.origin || 'unknown',
     safetyNotice: MANDATORY_SAFETY_NOTICE,
     pageEvidence: {
       title: pageContext.title || null,
