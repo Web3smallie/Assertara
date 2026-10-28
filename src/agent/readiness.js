@@ -141,29 +141,6 @@ function probeBin(bin, args = ['--version'], timeoutMs = 5000) {
   });
 }
 
-// Check scratch lives under the project's gitignored data/ dir: system temp
-// is not reliably writable (sandbox EPERM) and project temp keeps the mess
-// contained. Directories are removed after each check.
-function scratchRoot() {
-  const root = path.join(__dirname, '..', '..', 'data', '.readiness-tmp');
-  fs.mkdirSync(root, { recursive: true });
-  return root;
-}
-
-function releaseScratch(dir) {
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
-  try { fs.rmdirSync(path.join(__dirname, '..', '..', 'data', '.readiness-tmp')); } catch { /* non-empty or gone */ }
-}
-
-async function withTempDirAsync(prefix, fn) {
-  const dir = fs.mkdtempSync(path.join(scratchRoot(), prefix));
-  try {
-    return await fn(dir);
-  } finally {
-    releaseScratch(dir);
-  }
-}
-
 // ---------- Capability checks ----------
 // Each check returns a validated record. Injected doubles (probe, client,
 // fs, apiKey) are labeled `mock`; real local execution is `live`; local
@@ -200,7 +177,6 @@ async function checkExperimentalRunners(deps = {}) {
 async function checkLocalCore(deps = {}) {
   const { EvidenceGraph } = require('./evidenceGraph');
   const { Recorder, replayRecording } = require('./replay');
-  const { WatchScheduler } = require('./scheduler');
   const g = new EvidenceGraph('inv_readiness');
   const node = g.append({ kind: 'ReadinessProbe', producer: 'TOOL', payload: { probe: true }, created_turn: 0 });
   const rec = new Recorder({ investigationId: 'inv_readiness', runId: 'run_readiness', now: () => scriptedNow(deps) });
@@ -211,27 +187,17 @@ async function checkLocalCore(deps = {}) {
   if (replayed.status !== 'OK' || replayed.integrity.verified !== true) {
     throw readinessError('CORE_PROBE_FAILED', 'local record/replay round-trip did not verify');
   }
-  const alerts = await withTempDirAsync('assertara-ready-sched-', async (dir) => {
-    const sched = new WatchScheduler({ dir, now: () => scriptedNow(deps) });
-    sched.client = {
-      async getBytecode() { return '0x11'; },
-      async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; }
-    };
-    sched.addTarget({ address: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', intervalMs: 5000 });
-    await sched.tickOnce();
-    return sched.getAlerts({});
-  });
   return makeRecord({
     capability: 'core.local',
     name: 'Local deterministic core',
     status: 'READY',
-    checked: ['evidence graph append', 'event record + hash chain', 'historical replay verify', 'scheduler tick + alert store'],
-    succeeded: ['evidence graph append', 'event record + hash chain', 'historical replay verify', 'scheduler tick + alert store'],
+    checked: ['evidence graph append', 'event record + hash chain', 'historical replay verify'],
+    succeeded: ['evidence graph append', 'event record + hash chain', 'historical replay verify'],
     failed: [],
     unknown: [],
-    dependencies: [{ name: 'chain client (scheduler)', state: 'scripted-read-only for this probe; production injects a viem client' }],
+    dependencies: [],
     executedWith: 'live',
-    evidence: { graphNode: node.id, replayEvents: replayed.integrity.checkedEvents, schedulerAlerts: alerts.length }
+    evidence: { graphNode: node.id, replayEvents: replayed.integrity.checkedEvents }
   });
 }
 
@@ -272,53 +238,6 @@ async function checkHarness(deps = {}) {
   });
 }
 
-async function checkStt(deps = {}) {
-  const { detectAudioCapabilities } = require('./audioIngest');
-  const caps = await detectAudioCapabilities(deps.probe ? { probe: deps.probe } : {});
-  return makeRecord({
-    capability: 'media.stt',
-    name: 'Audio transcription backend',
-    status: 'UNAVAILABLE',
-    checked: ['ffmpeg decoder', 'STT backend'],
-    succeeded: [],
-    failed: [
-      `ffmpeg (${caps.ffmpeg && caps.ffmpeg.available ? `present ${caps.ffmpeg.version || ''}`.trim() : (caps.ffmpeg && caps.ffmpeg.error) || 'absent'}) — non-WAV decoding blocked`,
-      `STT backend (${(caps.sttBackend && caps.sttBackend.error) || 'none installed'})`
-    ],
-    unknown: [],
-    dependencies: [
-      { name: 'ffmpeg', state: caps.ffmpeg && caps.ffmpeg.available ? 'present' : 'absent' },
-      { name: 'local STT backend', state: 'none-ships' }
-    ],
-    executedWith: deps.probe ? 'mock' : 'probe',
-    evidence: { ffmpeg: caps.ffmpeg || null, sttBackend: caps.sttBackend || null, canTranscribe: caps.canTranscribe === true, decodableFormats: caps.decodableFormats || [] }
-  });
-}
-
-async function checkFrames(deps = {}) {
-  const { detectVideoCapabilities } = require('./videoIngest');
-  const caps = await detectVideoCapabilities(deps.probe ? { probe: deps.probe } : {});
-  return makeRecord({
-    capability: 'media.frames',
-    name: 'Video frame extraction',
-    status: 'UNAVAILABLE',
-    checked: ['ffmpeg extractor', 'frame extractor backend', 'vision model input path'],
-    succeeded: [],
-    failed: [
-      `ffmpeg (${caps.ffmpeg && caps.ffmpeg.available ? 'present' : (caps.ffmpeg && caps.ffmpeg.error) || 'absent'})`,
-      `frame extractor (${(caps.frameExtraction && caps.frameExtraction.error) || 'none installed'})`
-    ],
-    unknown: [],
-    dependencies: [
-      { name: 'ffmpeg', state: caps.ffmpeg && caps.ffmpeg.available ? 'present' : 'absent' },
-      { name: 'frame extractor', state: 'none-ships' },
-      { name: 'vision model (input_image)', state: caps.visionModel && caps.visionModel.available ? 'probe-verified' : 'unknown' }
-    ],
-    executedWith: deps.probe ? 'mock' : 'probe',
-    evidence: { ffmpeg: caps.ffmpeg || null, frameExtraction: caps.frameExtraction || null, canProcessVideo: caps.canProcessVideo === true }
-  });
-}
-
 async function checkOcr(deps = {}) {
   let installed = false;
   let version = null;
@@ -356,7 +275,7 @@ async function checkOcr(deps = {}) {
     unknown: ['live recognition run (needs traineddata; exercised outside the unit suite, not re-probed here)'],
     dependencies: [{ name: 'tesseract.js', state: 'present' }, { name: 'eng traineddata', state: 'unprobed' }],
     executedWith: deps.resolve ? 'mock' : 'probe',
-    evidence: { installed: true, version, lastLiveEvidence: 'Phase 10 walkthrough run: real OCR exact on synthetic frames (contracts §19)' }
+    evidence: { installed: true, version, lastLiveEvidence: 'Live walkthrough run on 2026-10-27: real OCR exact on synthetic frames' }
   });
 }
 
@@ -412,108 +331,6 @@ async function checkForge(deps = {}) {
   });
 }
 
-function fixtureChainClient() {
-  return {
-    async getChainId() { return 1; },
-    async getBlockNumber() { return 100n; },
-    async getLogs() { return []; },
-    async readContract() { return 0n; }
-  };
-}
-
-async function checkChainHistory(deps = {}) {
-  const { discoverApprovals } = require('./chain');
-  const live = deps.live === true;
-  if (live && !deps.client && !deps.rpcUrl) {
-    throw readinessError('LIVE_NEEDS_TARGET', 'live chain probe requires an explicit client or rpcUrl');
-  }
-  if (!live && !deps.client) {
-    const fetched = await discoverApprovals({
-      owner: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-      tokens: ['0xdAC17F958D2ee523a2206206994597C13D831ec7'],
-      fromBlock: 90n, toBlock: 100n, client: fixtureChainClient()
-    });
-    return makeRecord({
-      capability: 'chain.history',
-      name: 'Bounded approval history discovery',
-      status: 'PARTIAL',
-      checked: ['bounded discovery logic (fixture)', 'coverage accounting (fixture)'],
-      succeeded: [`bounded discovery logic (fixture → ${fetched.coverage.status})`, 'coverage accounting (fixture)'],
-      failed: [],
-      unknown: ['live provider reachability (network checks are explicit opt-in; last verified 2026-10-27 per contracts §15)'],
-      dependencies: [{ name: 'RPC provider', state: 'unprobed' }, { name: 'archive access', state: 'unavailable-on-free-tier' }],
-      executedWith: 'fixture',
-      evidence: { coverage: fetched.coverage.status }
-    });
-  }
-  const label = deps.client ? 'mock' : 'live';
-  const fetched = await discoverApprovals({
-    owner: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-    tokens: ['0xdAC17F958D2ee523a2206206994597C13D831ec7'],
-    fromBlock: 90n, toBlock: 100n,
-    ...(deps.client ? { client: deps.client } : { rpcUrl: deps.rpcUrl })
-  });
-  if (label === 'mock') {
-    return makeRecord({
-      capability: 'chain.history',
-      name: 'Bounded approval history discovery',
-      status: 'PARTIAL',
-      checked: ['bounded discovery logic (scripted client)'],
-      succeeded: ['bounded discovery logic (scripted client)'],
-      failed: [],
-      unknown: ['live provider behavior (a scripted client proves nothing about production RPC)'],
-      dependencies: [{ name: 'RPC provider', state: 'scripted-double' }],
-      executedWith: 'mock',
-      evidence: { coverage: fetched.coverage.status }
-    });
-  }
-  // Archive depth is out of scope for the BOUNDED capability: it lives in
-  // dependencies, not unknowns. READY here means recent-range discovery
-  // works; it never means full history.
-  const complete = fetched.coverage.status === 'COMPLETE_WITHIN_REQUESTED_SCOPE';
-  return makeRecord({
-    capability: 'chain.history',
-    name: 'Bounded approval history discovery',
-    status: complete ? 'READY' : 'PARTIAL',
-    checked: ['tip read', 'bounded address+topic query'],
-    succeeded: ['tip read', `bounded address+topic query (${fetched.coverage.status})`],
-    failed: [],
-    unknown: complete ? [] : [`requested-scope gaps present (${fetched.coverage.status})`],
-    dependencies: [{ name: 'RPC provider', state: 'reachable' }, { name: 'archive access', state: 'unavailable-on-free-tier' }],
-    executedWith: 'live',
-    evidence: { coverage: fetched.coverage.status, events: fetched.approvals.length }
-  });
-}
-
-async function checkChainSource(deps = {}) {
-  const { buildDossier } = require('./dossier');
-  const dossier = await buildDossier({
-    address: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-    client: deps.client || {
-      async getBytecode() { return '0x'; },
-      async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; },
-      async getBlockNumber() { return 100n; },
-      async getLogs() { return []; },
-      async readContract() { return 0n; },
-      async getChainId() { return 1; }
-    },
-    history: false
-  });
-  const section = dossier.source || {};
-  return makeRecord({
-    capability: 'chain.source',
-    name: 'Verified-source retrieval',
-    status: 'UNAVAILABLE',
-    checked: ['dossier source section without a provider'],
-    succeeded: [],
-    failed: [`verified-source provider (none configured; section standing: ${section.standing || 'missing'})`],
-    unknown: [],
-    dependencies: [{ name: 'explorer API + key', state: 'not-configured (registration required; needs approval)' }],
-    executedWith: 'mock',
-    evidence: { standing: section.standing || null, requirements: section.requirements || [] }
-  });
-}
-
 function keyConfigured(apiKey) {
   return Boolean(apiKey) && !String(apiKey).includes('your_meta') && !String(apiKey).startsWith('mock_');
 }
@@ -542,7 +359,7 @@ async function checkSpark(deps = {}) {
     checked: ['api key presence (value never recorded)'],
     succeeded: ['api key presence (configured)'],
     failed: [],
-    unknown: ['live reachability (not re-probed offline; probe script PASSED live 2026-10-27; F9/F10/F12 strict-schema lanes live-verified per contracts)'],
+    unknown: ['live reachability (not re-probed offline; probe script PASSED live 2026-10-27; F12 strict-schema lane live-verified)'],
     dependencies: [{ name: 'MODEL_API_KEY', state: 'configured' }, { name: 'Meta Model API', state: 'unprobed-this-run' }],
     executedWith: deps.apiKey !== undefined ? 'mock' : 'probe',
     evidence: { configured: true }
@@ -580,34 +397,6 @@ async function checkSam(deps = {}) {
   });
 }
 
-async function checkMonitorPush(deps = {}) {
-  const { WatchScheduler } = require('./scheduler');
-  const seen = await withTempDirAsync('assertara-ready-mon-', async (dir) => {
-    let now = scriptedNow(deps);
-    const sched = new WatchScheduler({ dir, now: () => now });
-    sched.client = {
-      async getBytecode() { return '0x11'; },
-      async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; }
-    };
-    sched.addTarget({ address: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', intervalMs: 5000 });
-    now += 6000;
-    await sched.tickOnce();
-    return sched.getAlerts({});
-  });
-  return makeRecord({
-    capability: 'monitor.push',
-    name: 'Night Watch alert delivery',
-    status: 'PARTIAL',
-    checked: ['change detection + alert store (live local run)', 'push delivery transport'],
-    succeeded: [`change detection + alert store (live local run; ${seen.length} alerts readable via getAlerts)`],
-    failed: ['push delivery transport (none exists; alerts are pull-only)'],
-    unknown: [],
-    dependencies: [{ name: 'scheduler store', state: 'working' }, { name: 'push transport', state: 'none-ships' }],
-    executedWith: 'live',
-    evidence: { alertsReadable: seen.length }
-  });
-}
-
 async function checkWebIntel() {
   const { describeTools } = require('./toolRegistry');
   const found = describeTools().filter((t) => /web|search|intel|browser/i.test(`${t.name} ${t.description}`));
@@ -618,7 +407,7 @@ async function checkWebIntel() {
       status: 'UNAVAILABLE',
       checked: ['tool registry scan for web/intel tools'],
       succeeded: [],
-      failed: ['web research tool (none registered; F7 incident synthesis has no source)'],
+      failed: ['web research tool (none registered; no investigation lane has a web source)'],
       unknown: [],
       dependencies: [{ name: 'web research tool', state: 'none-ships' }],
       executedWith: 'probe',
@@ -659,13 +448,13 @@ const CAPABILITIES = {
   },
   'core.local': {
     id: 'core.local', name: 'Local deterministic core',
-    purpose: 'Evidence graph, event recording, replay, scheduler store — the offline foundation every feature builds on.',
-    entryPoint: 'evidenceGraph.js, replay.js, scheduler.js',
-    dependencies: ['chain client (injected, read-only)'], executionKind: 'deterministic',
+    purpose: 'Evidence graph, event recording, replay — the offline foundation every feature builds on.',
+    entryPoint: 'evidenceGraph.js, replay.js',
+    dependencies: [], executionKind: 'deterministic',
     classification: 'READY',
-    classificationEvidence: 'Exercised live by its own check (graph append, hash-chained record, verified replay, scheduler tick) with no network.',
+    classificationEvidence: 'Exercised live by its own check (graph append, hash-chained record, verified replay) with no network.',
     lastLiveEvidence: null,
-    limitations: ['Scheduler runs only while the process is alive (no 24/7 claim).'],
+    limitations: ['Covers local record/replay only; model and execution lanes are inventoried separately.'],
     tests: ['test/unit/readiness.test.js T2'],
     check: checkLocalCore
   },
@@ -681,38 +470,14 @@ const CAPABILITIES = {
     tests: ['test/unit/harness.test.js T1/T2', 'test/unit/sandbox.test.js', 'test/unit/readiness.test.js T2/T3'],
     check: checkHarness
   },
-  'media.stt': {
-    id: 'media.stt', name: 'Audio transcription backend',
-    purpose: 'Turn call audio into timestamped segments for Scam-Call Analyzer (F8 audio lane).',
-    entryPoint: 'ingestAudio (src/agent/audioIngest.js), transcribe_audio tool',
-    dependencies: ['ffmpeg (decoding)', 'local STT backend (contracts §14)'], executionKind: 'external-state',
-    classification: 'UNAVAILABLE',
-    classificationEvidence: 'No STT backend ships; ffmpeg/ffprobe absent 2026-10-27. Valid audio returns TRANSCRIPTION_UNAVAILABLE; transcript-only lane unaffected.',
-    lastLiveEvidence: null,
-    limitations: ['Only WAV/PCM is parseable; transcription needs an STT backend + ffmpeg.'],
-    tests: ['test/unit/audioIngest.test.js T1/T4', 'test/unit/readiness.test.js T8'],
-    check: checkStt
-  },
-  'media.frames': {
-    id: 'media.frames', name: 'Video frame extraction',
-    purpose: 'Decode walkthrough video into timestamped frames for F11 ingest lane.',
-    entryPoint: 'ingestVideo (src/agent/videoIngest.js), video_analysis tool',
-    dependencies: ['ffmpeg', 'frame extractor (contracts §19)'], executionKind: 'external-state',
-    classification: 'UNAVAILABLE',
-    classificationEvidence: 'No extractor ships; ffmpeg absent 2026-10-27. Valid video returns VIDEO_PROCESSING_UNAVAILABLE; caller-supplied frames use the analysis lane instead.',
-    lastLiveEvidence: null,
-    limitations: ['Frame analysis works on supplied frames only (provenance labeled).'],
-    tests: ['test/unit/videoIngest.test.js T1/T7', 'test/unit/readiness.test.js T8'],
-    check: checkFrames
-  },
   'media.ocr': {
     id: 'media.ocr', name: 'Tesseract OCR text extraction',
-    purpose: 'Extract on-screen text from SAM regions (core pipeline + F11 frames).',
+    purpose: 'Extract on-screen text from SAM regions in the core pipeline.',
     entryPoint: 'extractUiTexts (src/services/ocrService.js), ocr_region tool',
     dependencies: ['tesseract.js', 'eng traineddata'], executionKind: 'deterministic',
     classification: 'READY',
-    classificationEvidence: 'tesseract.js installed; real OCR ran exact on synthetic frames in the Phase 10 live walkthrough (contracts §19).',
-    lastLiveEvidence: '2026-10-27: Phase 10 live walkthrough, real OCR exact.',
+    classificationEvidence: 'tesseract.js installed; real OCR ran exact on synthetic frames in a live walkthrough on 2026-10-27.',
+    lastLiveEvidence: '2026-10-27: live walkthrough, real OCR exact.',
     limitations: ['Automated check verifies installation only; recognition needs traineddata and is not re-probed in the unit suite.'],
     tests: ['test/unit/readiness.test.js T2'],
     check: checkOcr
@@ -729,39 +494,15 @@ const CAPABILITIES = {
     tests: ['test/unit/readiness.test.js T2'],
     check: checkForge
   },
-  'chain.history': {
-    id: 'chain.history', name: 'Bounded approval history discovery',
-    purpose: 'Address-scoped Approval log discovery with honest coverage (F6).',
-    entryPoint: 'discoverApprovals (src/agent/chain.js), chain_history tool',
-    dependencies: ['RPC provider', 'archive access (deep ranges)'], executionKind: 'external-state',
-    classification: 'PARTIAL',
-    classificationEvidence: 'Live 2026-10-27 on publicnode: address+topic queries over recent ranges succeed (empty + positive cases, live allowance ground truth); topic-only and ~20k+ block ranges rejected; no indexing API configured (contracts §15).',
-    lastLiveEvidence: '2026-10-27: publicnode recent-range discovery verified; deep ranges rejected (403).',
-    limitations: ['Recent ranges only on the free tier; full-history claims unsupported by construction.'],
-    tests: ['test/unit/history.test.js', 'test/unit/readiness.test.js T2'],
-    check: checkChainHistory
-  },
-  'chain.source': {
-    id: 'chain.source', name: 'Verified-source retrieval',
-    purpose: 'Fetch verified contract source for dossiers (F7 source section).',
-    entryPoint: 'buildDossier sourceProvider (src/agent/dossier.js)',
-    dependencies: ['explorer API + key (registration required)'], executionKind: 'external-state',
-    classification: 'UNAVAILABLE',
-    classificationEvidence: 'No sourceProvider is configured; dossier source sections report UNAVAILABLE with requirements (dossier T4).',
-    lastLiveEvidence: null,
-    limitations: ['Source sections unavailable; ABI/provided-source analysis labeled accordingly.'],
-    tests: ['test/unit/dossier.test.js T4', 'test/unit/readiness.test.js T2'],
-    check: checkChainSource
-  },
   'model.spark': {
     id: 'model.spark', name: 'Muse Spark model reasoning',
-    purpose: 'Model-backed investigation, Q&A, assessment, vision, and localization lanes.',
+    purpose: 'Model-backed investigation, translation, triage, and localization lanes.',
     entryPoint: 'SparkAdapter (src/agent/sparkAdapter.js)',
     dependencies: ['MODEL_API_KEY', 'Meta Model API'], executionKind: 'model-assisted',
     classification: 'READY',
-    classificationEvidence: 'Probe script PASSED (live) 2026-10-27; F9/F10/F12 strict-schema lanes live-verified (contracts §17/§18/§20); vision input_image live-verified (§19).',
+    classificationEvidence: 'Probe script PASSED (live) 2026-10-27; F12 strict-schema lane live-verified.',
     lastLiveEvidence: '2026-10-27: probe script PASSED (live), 9.4s.',
-    limitations: ['Other feature-runner schemas are stub-tested only; live behavior unverified (contracts §17).'],
+    limitations: ['Other feature-runner schemas are stub-tested only; live behavior unverified.'],
     tests: ['src/scripts/probeMetaApi.js (live, outside unit suite)', 'test/unit/agent.test.js T3/T4 (stubbed)'],
     check: checkSpark
   },
@@ -777,24 +518,12 @@ const CAPABILITIES = {
     tests: ['test/unit/samSchema.test.js', 'src/scripts/probeMetaApi.js (live, outside unit suite)'],
     check: checkSam
   },
-  'monitor.push': {
-    id: 'monitor.push', name: 'Night Watch alert delivery',
-    purpose: 'Deliver monitoring alerts beyond pull-based getAlerts (F14).',
-    entryPoint: 'WatchScheduler.getAlerts (src/agent/scheduler.js)',
-    dependencies: ['scheduler store', 'push transport (none ships)'], executionKind: 'deterministic',
-    classification: 'PARTIAL',
-    classificationEvidence: 'Detection + alert store run live locally (scheduler T6; this check re-runs them); no push transport exists.',
-    lastLiveEvidence: null,
-    limitations: ['Alerts are pull-only; no push delivery, routes, or UI.'],
-    tests: ['test/unit/scheduler.test.js T6', 'test/unit/readiness.test.js T2'],
-    check: checkMonitorPush
-  },
   'web.intel': {
     id: 'web.intel', name: 'Public incident intel / web research',
-    purpose: 'Source public incident reports for dossier synthesis (F7).',
+    purpose: 'Source public incident reports for investigation synthesis (no registered consumer yet).',
     entryPoint: null,
     classification: 'UNAVAILABLE',
-    classificationEvidence: 'No web/intel tool is registered in the tool registry (this check scans it); F7 limitations document the gap.',
+    classificationEvidence: 'No web/intel tool is registered in the tool registry (this check scans it).',
     dependencies: [], executionKind: 'external-state',
     lastLiveEvidence: null,
     limitations: ['Gap documented, not filled: no approved web source, no retrieval tool.'],

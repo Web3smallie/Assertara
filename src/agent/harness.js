@@ -30,8 +30,8 @@
  * - NOT_REPRODUCED: finished, criterion evaluated, NOT met. Absence of
  *   reproduction is NOT proof of safety.
  * - PATCH_VERIFIED: verify-patch request where the PoC no longer reproduces
- *   AND the regression suite passes. This result *supplies* testEvidence
- *   for the audit ledger; only runAuditTransition sets VERIFIED_FIXED.
+ *   AND the regression suite passes. This result carries testEvidence
+ *   ({passed:true, logs}) for downstream consumers.
  */
 
 const crypto = require('crypto');
@@ -407,7 +407,7 @@ async function submitHarnessRun(input, deps = {}) {
         return {
           status: 'PATCH_VERIFIED', feature: 'F15_harness', lane: 'execute', ...record,
           testEvidence: { passed: true, logs: `poc-blocked; suite-passed\n--- poc ---\n${pocRun.stdout.text}\n--- suite ---\n${suiteRun.stdout.text}`.slice(0, req.limits.maxLogChars) },
-          note: 'PoC no longer reproduces and the regression suite passes. This result SUPPLIES ledger testEvidence; only runAuditTransition sets VERIFIED_FIXED.'
+          note: 'PoC no longer reproduces and the regression suite passes. This result carries testEvidence ({passed:true, logs}) for downstream consumers.'
         };
       }
       return {

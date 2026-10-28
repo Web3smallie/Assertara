@@ -9,7 +9,7 @@ const { evaluateSemanticDiscrepancy, fallbackHeuristicReasoner } = require('../.
 const { compileEvidenceBundle } = require('../../src/services/evidenceService');
 const { adjudicate, runGates, GATES } = require('../../src/agent/verifier');
 const { EvidenceGraph } = require('../../src/agent/evidenceGraph');
-const { runFeature, runRepoReview } = require('../../src/agent/features');
+const { runFeature } = require('../../src/agent/features');
 const { runTool } = require('../../src/agent/toolRegistry');
 
 const ADDR_A = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
@@ -206,7 +206,7 @@ async function runHardeningTests() {
     console.log('✔ Test 6 Passed: Capping composition correct; malformed mixes reject.');
   }
 
-  // Test 7: all 8 legacy feature schemas meet strict-shape requirements.
+  // Test 7: all 4 retained feature schemas meet strict-shape requirements.
   {
     const captured = {};
     const cap = (key, content) => capturingStub(content);
@@ -216,60 +216,34 @@ async function runHardeningTests() {
     const tr = cap('tr', { signal: 'GREEN', reasons: [], needsDeepDive: false });
     await runFeature('F5_interceptor', { tx: APPROVE_TX }, { model: tr.model });
     captured.triage = tr.seen.args.schema;
-    const qa = cap('qa', { answer: 'a', citations: ['E-1'] });
-    await runFeature('F9_ask', { graphExport: { nodes: [{ id: 'E-1' }] }, question: 'q?' }, { model: qa.model });
-    captured.ask = qa.seen.args.schema;
     const scripted = { async nextTurn() { return { actions: [], stop: true, stopReason: 'd' }; } };
     const rv = cap('rv', { verdict: 'SUPPORTED', reasons: [] });
     await runFeature('F2_advanced', { goal: 'g', inputs: {}, hypotheses: [{ id: 'H-1', claim: 'c', supporting: ['E-001'] }] }, { modelClient: scripted, reviewer: rv.model });
     captured.review = rv.seen.args.schema;
-    const stubChain = { async getBlockNumber() { return 10n; }, async getLogs() { return []; }, async readContract() { return 0n; } };
-    const sn = cap('sn', { summary: 's', highestRisk: [] });
-    await runFeature('F6_sentinel', { owner: ADDR_A, tokens: [ADDR_B], fromBlock: 0n, toBlock: 5n }, { client: stubChain, model: sn.model });
-    captured.sentinel = sn.seen.args.schema;
-    const dx = cap('dx', { summary: 's', flags: [], unknowns: [] });
-    await runFeature('F7_dossier', { address: ADDR_A }, {
-      client: { ...stubChain, async getBytecode() { return '0x'; }, async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; } },
-      history: false, model: dx.model
-    });
-    captured.dossier = dx.seen.args.schema;
-    const sc = cap('sc', { annotations: [{ turn: 0, tactics: ['other-suspicious'], why: 'w' }] });
-    await runFeature('F8_scamcall', { turns: [{ text: 'hello' }] }, { model: sc.model });
-    captured.scamcall = sc.seen.args.schema;
-    const rr = cap('rr', { hypotheses: [{ claim: 'c', refs: ['a.sol:1'] }], pocDrafts: [], questions: [] });
-    await runRepoReview({ files: [{ path: 'a.sol', content: 'x' }] }, { model: rr.model });
-    captured.repoReview = rr.seen.args.schema;
-    assert.strictEqual(Object.keys(captured).length, 8, 'All 8 legacy runners captured');
+    const lz = cap('lz', { segments: [{ id: 'claim', text: 'Aprobación' }, { id: 'recommendedAction', text: 'Revisar' }] });
+    await runFeature('F12_localize', { finding: { claim: 'Approval', recommendedAction: 'Review' }, targetLang: 'es' }, { model: lz.model });
+    captured.localize = lz.seen.args.schema;
+    assert.strictEqual(Object.keys(captured).length, 4, 'All 4 retained runners captured');
     for (const [name, schema] of Object.entries(captured)) assertStrictSchema(schema, name);
-    console.log('✔ Test 7 Passed: All 8 legacy schemas are strict-compatible.');
+    console.log('✔ Test 7 Passed: All 4 retained schemas are strict-compatible.');
   }
 
   // Test 8: malformed model outputs on fixed-schema runners handled safely.
   {
     const garbage = await runFeature('F5_interceptor', { tx: APPROVE_TX }, { model: { async complete() { return { content: { signal: 'PURPLE', reasons: 'not-an-array', needsDeepDive: 'yes' } }; } } });
     assert.ok(['GREEN', 'AMBER', 'RED', 'INCONCLUSIVE'].includes(garbage.signal), 'Garbage signal cannot escape the enum');
-    const badTactic = await runFeature('F8_scamcall', { turns: [{ text: 'hi' }] }, { model: { async complete() { return { content: { annotations: [{ turn: 0, tactics: ['mind-control'], why: 'x' }, { turn: 9, tactics: [], why: 'y' }] } }; } } });
-    assert.strictEqual(badTactic.status, 'PARTIAL');
-    assert.strictEqual(badTactic.timeline.length, 0, 'Invalid tactics/turns dropped, never rendered');
-    assert.strictEqual(badTactic.dropped.length, 2);
-    const badCite = await runFeature('F9_ask', { graphExport: { nodes: [{ id: 'E-1' }] }, question: 'q?' }, { model: { async complete() { return { content: { answer: 'a', citations: ['E-999'] } }; } } });
-    assert.strictEqual(badCite.status, 'PARTIAL');
-    assert.deepStrictEqual(badCite.citations, [], 'Fabricated citations dropped');
     console.log('✔ Test 8 Passed: Malformed outputs contained on fixed runners.');
   }
 
   // Test 9: honest degraded behavior without a model.
   {
     await assert.rejects(runFeature('F4_translator', { tx: APPROVE_TX }, {}), /model client/);
-    await assert.rejects(runFeature('F8_scamcall', { turns: [{ text: 'hi' }] }, {}), /model client/);
-    await assert.rejects(runFeature('F9_ask', { graphExport: { nodes: [] }, question: 'q' }, {}), /model client/);
-    await assert.rejects(runRepoReview({ files: [{ path: 'a', content: 'x' }] }, {}), /model client/);
     const triage = await runFeature('F5_interceptor', { tx: APPROVE_TX }, {});
     assert.strictEqual(triage.reasons.some((r) => r.includes('unavailable')), true, 'Model-less triage says so');
     console.log('✔ Test 9 Passed: Missing models fail loudly or degrade honestly.');
   }
 
-  // Test 10: cross-feature boundary spot-checks (Phases 1–13 hold).
+  // Test 10: cross-feature boundary spot-checks (retained phases hold).
   {
     const g = new EvidenceGraph('inv_h10');
     const s = g.append({ kind: 'DecodedTx', producer: 'TOOL', payload: {}, created_turn: 1 });
@@ -279,8 +253,6 @@ async function runHardeningTests() {
     assert.strictEqual(adjudicate({ id: 'F-NR', claim: 'the PoC reproduced the bug', supporting: [nr.id], contradicting: [] }, g, { verdict: 'SUPPORTED', reasons: [] }).status, 'REJECTED', 'NOT_REPRODUCED is not reproduction');
     const to = g.append({ kind: 'ToolResult', producer: 'TOOL', payload: { error: 'timed out' }, created_turn: 1 });
     assert.strictEqual(adjudicate({ id: 'F-TO', claim: 'subject safe', supporting: [to.id], contradicting: [] }, g, { verdict: 'SUPPORTED', reasons: [] }).status, 'REJECTED', 'Timeouts cannot support');
-    const { runAuditTransition } = require('../../src/agent/features');
-    assert.strictEqual(runAuditTransition({ record: { id: 'R', status: 'FIX_CLAIMED', history: [] }, newStatus: 'VERIFIED_FIXED' }).status, 'REJECTED', 'FIX_CLAIMED ≠ VERIFIED_FIXED');
     const { Recorder, replayRecording } = require('../../src/agent/replay');
     const rec = new Recorder({ investigationId: 'i', runId: 'r' });
     rec.append('model.turn', { actor: 'model', data: { turn: 1 } });
@@ -304,41 +276,10 @@ async function runHardeningTests() {
     console.log('✔ Test 11 Passed: simulate_tx validates from/data pre-execution.');
   }
 
-  // Test 12: Phase 1–13 regression (all prior lanes intact).
+  // Test 12: retained-lane regression (harness, localize, readiness intact).
   {
-    const { WatchScheduler } = require('../../src/agent/scheduler');
-    const root = path.join(__dirname, '..', '..', 'data', '.test-tmp');
-    fs.mkdirSync(root, { recursive: true });
-    const scratch = fs.mkdtempSync(path.join(root, 'assertara-hardening-'));
-    let now = Date.now();
-    const sched = new WatchScheduler({ dir: scratch, now: () => now });
-    sched.client = {
-      async getBytecode() { return '0x11'; },
-      async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; }
-    };
-    sched.addTarget({ address: ADDR_A, intervalMs: 5000 });
-    now += 6000;
-    assert.strictEqual((await sched.tickOnce()).checked, 1, 'Scheduler intact');
-    fs.rmSync(scratch, { recursive: true, force: true });
-    try { fs.rmdirSync(root); } catch { /* non-empty or gone: leave it */ }
-    const { buildPdf } = require('./pdfIngest.test.js');
-    const { ingestAuditPdf, toLedgerIntake } = require('../../src/agent/pdfIngest');
-    const pdf = await ingestAuditPdf({ data: buildPdf([['H-01 Regression check', 'Body.']]) });
-    assert.strictEqual(toLedgerIntake(pdf).findings.length, 1, 'PDF intact');
     const { submitHarnessRun } = require('../../src/agent/harness');
     assert.strictEqual((await submitHarnessRun({ kind: 'static', files: [{ path: 'a.sol', content: 'x' }] })).status, 'STATIC_ANALYSIS_ONLY', 'Harness intact');
-    const { discoverApprovals } = require('../../src/agent/chain');
-    const hist = await discoverApprovals({
-      owner: ADDR_A, tokens: [ADDR_B], fromBlock: 0n, toBlock: 5n,
-      client: { async getBlockNumber() { return 10n; }, async getLogs() { return []; }, async readContract() { return 0n; } }
-    });
-    assert.strictEqual(hist.coverage.status, 'COMPLETE_WITHIN_REQUESTED_SCOPE', 'History intact');
-    const { answerFindingQuestion } = require('../../src/agent/askAbout');
-    const q = await answerFindingQuestion({
-      finding: { id: 'F-R', claim: 'c', supporting: ['E-1'], contradicting: [] },
-      evidence: [{ ref: 'E-1', kind: 'K', summary: 's' }], question: 'q?'
-    }, { model: { async complete() { return { content: { answer: 'a', citations: ['E-1'], answerable: 'full', uncertaintyNote: '', missingEvidence: [] } }; } } });
-    assert.strictEqual(q.status, 'OK', 'AskAbout intact');
     const { localizeAssessment } = require('../../src/agent/localize');
     const loc = await localizeAssessment({
       assessment: { segments: [{ id: 's', text: `Review ${SPENDER} carefully (E-001).` }], protected: {} },
@@ -347,7 +288,7 @@ async function runHardeningTests() {
     assert.strictEqual(loc.status, 'OK', 'Localize intact');
     const { checkReadiness: cr } = require('../../src/agent/readiness');
     assert.strictEqual((await cr('web.intel')).status, 'UNAVAILABLE', 'Readiness intact');
-    console.log('✔ Test 12 Passed: Phases 1–13 behavior preserved.');
+    console.log('✔ Test 12 Passed: Retained lanes behavior preserved.');
   }
 
   console.log('\nAll Hardening Tests Passed Successfully!\n');

@@ -279,12 +279,6 @@ async function runDriverTests() {
     assert.strictEqual(GATES.length, 8);
     assert.strictEqual(adjudicate({ id: 'F-0', claim: 'x', supporting: [], contradicting: [] }, g, { verdict: 'SUPPORTED', reasons: [] }).status, 'REJECTED', 'Empty support cannot verify');
     assert.strictEqual(runGates({ id: 'F', claim: 'x', supporting: [], contradicting: ['E-404'] }, g).pass, false);
-    const { answerFindingQuestion } = require('../../src/agent/askAbout');
-    const q = await answerFindingQuestion({
-      finding: { id: 'F-R', claim: 'c', supporting: ['E-1'], contradicting: [] },
-      evidence: [{ ref: 'E-1', kind: 'K', summary: 's' }], question: 'q?'
-    }, { model: { async complete() { return { content: { answer: 'a', citations: ['E-1'], answerable: 'full', uncertaintyNote: '', missingEvidence: [] } }; } } });
-    assert.strictEqual(q.status, 'OK');
     const { Recorder, replayRecording } = require('../../src/agent/replay');
     const rec = new Recorder({ investigationId: 'i', runId: 'r' });
     rec.append('investigation.started', { data: { featureId: 'F1_core' } });

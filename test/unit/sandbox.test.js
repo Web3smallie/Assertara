@@ -493,8 +493,8 @@ async function runSandboxTests() {
     assert.ok(Array.isArray(res.requirements) && res.requirements.length > 0);
     // Real probe against this machine (no doubles): must fail closed, honestly.
     const live = await verifySandbox({ runtime: 'auto', image: IMAGE, workspaceRoot: tempRoot() });
-    assert.strictEqual(live.ok, false, 'no runtime here, so verification must fail');
-    assert.strictEqual(live.stage, 'runtime');
+    assert.strictEqual(live.ok, false, 'no usable runtime here, so verification must fail');
+    assert.ok(live.stage === 'runtime' || live.stage === 'daemon', `live negative must fail at the runtime or daemon stage (got ${live.stage})`);
     const { checkReadiness } = require('../../src/agent/readiness');
     const rec = await checkReadiness('exec.harness');
     assert.strictEqual(rec.status, 'UNAVAILABLE');

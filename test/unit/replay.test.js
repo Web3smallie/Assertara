@@ -321,79 +321,24 @@ async function runReplayTests() {
     console.log('✔ Test 11 Passed: Caps enforced at every layer.');
   }
 
-  // Test 12: Phase 1–11 regression (all prior lanes intact).
+  // Test 12: retained-lane regression (verifier, harness, localize intact).
   {
     const { adjudicate } = require('../../src/agent/verifier');
     const { EvidenceGraph } = require('../../src/agent/evidenceGraph');
     const g = new EvidenceGraph('inv_phase12reg');
     const exp = g.append({ kind: 'ModelReading', producer: 'MODEL', payload: { experimental: true }, created_turn: 1 });
     const capped = adjudicate({ supporting: [exp.id], conflicting: [] }, g, { verdict: 'SUPPORTED', reasons: [] });
-    assert.strictEqual(capped.status, 'HYPOTHESIS', 'Phase 1 intact');
-    const { WatchScheduler } = require('../../src/agent/scheduler');
-    const root = path.join(__dirname, '..', '..', 'data', '.test-tmp');
-    fs.mkdirSync(root, { recursive: true });
-    const scratch = fs.mkdtempSync(path.join(root, 'assertara-replay-reg-'));
-    let now = Date.now();
-    const sched = new WatchScheduler({ dir: scratch, now: () => now });
-    sched.client = {
-      async getBytecode() { return '0x11'; },
-      async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; }
-    };
-    sched.addTarget({ address: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', intervalMs: 5000 });
-    now += 6000;
-    assert.strictEqual((await sched.tickOnce()).checked, 1, 'Phase 2 intact');
-    fs.rmSync(scratch, { recursive: true, force: true });
-    try { fs.rmdirSync(root); } catch { /* non-empty or gone: leave it */ }
-    const { buildPdf } = require('./pdfIngest.test.js');
-    const { ingestAuditPdf, toLedgerIntake } = require('../../src/agent/pdfIngest');
-    const pdf = await ingestAuditPdf({ data: buildPdf([['H-01 Regression check', 'Body.']]) });
-    assert.strictEqual(toLedgerIntake(pdf).findings.length, 1, 'Phase 3 intact');
+    assert.strictEqual(capped.status, 'HYPOTHESIS', 'Verifier intact');
     const { submitHarnessRun } = require('../../src/agent/harness');
     const statik = await submitHarnessRun({ kind: 'static', files: [{ path: 'a.sol', content: 'x' }] });
-    assert.strictEqual(statik.status, 'STATIC_ANALYSIS_ONLY', 'Phase 4 intact');
-    const { ingestTranscript } = require('../../src/agent/audioIngest');
-    assert.ok(ingestTranscript({ text: 'hi' }).turns.every((x) => x.provenance === 'TRANSCRIPT_PROVIDED'), 'Phase 5 intact');
-    const { discoverApprovals } = require('../../src/agent/chain');
-    const stubChain = {
-      async getBlockNumber() { return 10n; },
-      async getLogs() { return []; },
-      async readContract() { return 0n; }
-    };
-    const hist = await discoverApprovals({
-      owner: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-      tokens: ['0xdAC17F958D2ee523a2206206994597C13D831ec7'],
-      fromBlock: 0n, toBlock: 5n, client: stubChain
-    });
-    assert.strictEqual(hist.coverage.status, 'COMPLETE_WITHIN_REQUESTED_SCOPE', 'Phase 6 intact');
-    const { buildDossier } = require('../../src/agent/dossier');
-    const d = await buildDossier({
-      address: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-      client: { ...stubChain, async getBytecode() { return '0x'; }, async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; } },
-      history: false
-    });
-    assert.strictEqual(d.bytecode.hasCode, false, 'Phase 7 intact');
-    const { answerFindingQuestion } = require('../../src/agent/askAbout');
-    const q = await answerFindingQuestion({
-      finding: { id: 'F-R', claim: 'c', supporting: ['E-1'], contradicting: [] },
-      evidence: [{ ref: 'E-1', kind: 'K', summary: 's' }], question: 'q?'
-    }, { model: { async complete() { return { content: { answer: 'a', citations: ['E-1'], answerable: 'full', uncertaintyNote: '', missingEvidence: [] } }; } } });
-    assert.strictEqual(q.status, 'OK', 'Phase 8 intact');
-    const { assessAuditFindings } = require('../../src/agent/auditAssess');
-    const a = await assessAuditFindings({
-      records: [{ id: 'R-1', description: 'd', location: 'p.1', status: 'UNRESOLVED', history: [] }],
-      report: { status: 'OK', findings: [{ index: 0, sourceId: null, severity: null, title: 't', startPage: 1, endPage: 1, quote: 'q', codeRefs: [] }] }
-    });
-    assert.strictEqual(a.assessments[0].verdict, 'UNRESOLVED', 'Phase 9 intact');
-    const { detectVideoCapabilities } = require('../../src/agent/videoIngest');
-    const caps = await detectVideoCapabilities();
-    assert.strictEqual(caps.canProcessVideo, false, 'Phase 10 intact');
+    assert.strictEqual(statik.status, 'STATIC_ANALYSIS_ONLY', 'Harness intact');
     const { localizeAssessment } = require('../../src/agent/localize');
     const loc = await localizeAssessment({
       assessment: { segments: [{ id: 's', text: `Review 0x942c733fa43900388424a1bf7f94d934b3531b23 carefully (E-001).` }], protected: {} },
       targetLang: 'es'
     }, { model: { async complete() { return { content: { segments: [{ id: 's', text: 'Revise 0x942c733fa43900388424a1bf7f94d934b3531b23 cuidadosamente (E-001).' }] } }; } } });
-    assert.strictEqual(loc.status, 'OK', 'Phase 11 intact');
-    console.log('✔ Test 12 Passed: Phases 1–11 behavior preserved.');
+    assert.strictEqual(loc.status, 'OK', 'Localize intact');
+    console.log('✔ Test 12 Passed: Retained lanes behavior preserved.');
   }
 
   // Test 13 (Phase 15): execution failures pair with their own error nodes —

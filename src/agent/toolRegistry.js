@@ -1,8 +1,10 @@
 /**
- * Assertara Tool Registry — typed, validated backend tools.
- * Every tool wraps genuinely supported capability (existing services, viem
- * read-only calls). Anything unavailable is an explicit UNAVAILABLE boundary
- * with integration requirements — never a silent mock.
+ * Assertara Tool Registry — typed, validated backend tools for the core
+ * transaction-intent investigator (decode, compare, allowance, SAM
+ * segmentation, crop, OCR, simulation, consistency checks) plus the
+ * retained harness lane (sandbox_exec). Every tool wraps a genuinely
+ * supported capability. Removed lanes (chain-history, PDF, audio, video,
+ * scheduling) were deleted with their modules; unknown tool names throw.
  */
 
 const { decodeTransactionCalldata } = require('../services/decoderService');
@@ -101,47 +103,9 @@ async function simulateTxImpl({ from, to, data, value, decoded }) {
   return simulateTransactionWithFoundry({ from, to, data, decodedTx });
 }
 
-async function contractMetaImpl({ address, rpcUrl }) {
-  const { readContractMeta } = require('./chain');
-  return readContractMeta({ address, rpcUrl });
-}
-
-async function pdfExtractImpl({ pdfBase64, filename, pageImages, limits }) {
-  const { ingestAuditPdf } = require('./pdfIngest');
-  return ingestAuditPdf({ data: pdfBase64, filename, pageImages, limits });
-}
-
 async function sandboxExecImpl({ kind, files, entry, criterion, poc, suite, timeoutMs, maxLogChars }) {
   const { submitHarnessRun } = require('./harness');
   return submitHarnessRun({ kind, files, entry, criterion, poc, suite, timeoutMs, maxLogChars });
-}
-
-async function videoAnalysisImpl({ videoBase64, filename, sampleFps, maxFrames, maxBytes, maxDurationSec }) {
-  const { ingestVideo } = require('./videoIngest');
-  return ingestVideo({ data: videoBase64, filename, sampleFps, maxFrames, maxBytes, maxDurationSec });
-}
-
-async function transcribeAudioImpl({ audioBase64, filename, mimeType, timeoutMs, maxBytes, maxDurationSec, maxSegments, maxChars }) {
-  const { ingestAudio } = require('./audioIngest');
-  return ingestAudio({ data: audioBase64, filename, mimeType, timeoutMs, maxBytes, maxDurationSec, maxSegments, maxChars });
-}
-
-async function chainHistoryImpl({ owner, rpcUrl, fromBlock, toBlock, maxLogs }) {
-  const { discoverApprovals, computeExposure } = require('./chain');
-  const fetched = await discoverApprovals({ owner, rpcUrl, fromBlock, toBlock, maxLogs });
-  return { ...fetched, exposure: computeExposure(fetched.approvals) };
-}
-
-function unavailable(name, requirements) {
-  return {
-    name,
-    description: `UNAVAILABLE boundary: ${requirements[0]}`,
-    status: 'UNAVAILABLE',
-    requirements,
-    async run() {
-      return { status: 'UNAVAILABLE', tool: name, requirements };
-    }
-  };
 }
 
 const TOOLS = {
@@ -199,24 +163,6 @@ const TOOLS = {
     },
     run: simulateTxImpl
   },
-  contract_meta: {
-    name: 'contract_meta',
-    description: 'Read-only chain metadata: bytecode presence, EIP-1967 proxy slots.',
-    required: ['address'],
-    validate: (a) => {
-      if (!isAddress(a.address)) throw new Error('contract_meta: address must be a 0x address');
-    },
-    run: contractMetaImpl
-  },
-  chain_history: {
-    name: 'chain_history',
-    description: 'Read-only approval history for an owner: Approval logs plus live allowances and exposure.',
-    required: ['owner'],
-    validate: (a) => {
-      if (!isAddress(a.owner)) throw new Error('chain_history: owner must be a 0x address');
-    },
-    run: chainHistoryImpl
-  },
   check_consistency: {
     name: 'check_consistency',
     description: 'Validate finding evidence references against a supplied id list.',
@@ -237,40 +183,6 @@ const TOOLS = {
       };
     }
   },
-  transcribe_audio: {
-    name: 'transcribe_audio',
-    description: 'Validate audio and transcribe via the configured STT backend. No backend is installed in this environment: valid audio returns TRANSCRIPTION_UNAVAILABLE with detection evidence; only WAV/PCM is parseable.',
-    required: ['audioBase64'],
-    validate: (a) => {
-      if (typeof a.audioBase64 !== 'string' || a.audioBase64.length === 0) throw new Error('transcribe_audio: audioBase64 must be a non-empty base64 string');
-      if (!/^[A-Za-z0-9+/=\s]+$/.test(a.audioBase64)) throw new Error('transcribe_audio: audioBase64 must be base64');
-    },
-    run: transcribeAudioImpl
-  },
-  video_analysis: {
-    name: 'video_analysis',
-    description: 'Validate a walkthrough video and extract frames via the configured backend. No extractor is installed in this environment: valid video returns VIDEO_PROCESSING_UNAVAILABLE with detection evidence; frames are never faked.',
-    required: ['videoBase64'],
-    validate: (a) => {
-      if (typeof a.videoBase64 !== 'string' || a.videoBase64.length === 0) throw new Error('video_analysis: videoBase64 must be a non-empty base64 string');
-      if (!/^[A-Za-z0-9+/=\s]+$/.test(a.videoBase64)) throw new Error('video_analysis: videoBase64 must be base64');
-    },
-    run: videoAnalysisImpl
-  },
-  pdf_extract: {
-    name: 'pdf_extract',
-    description: 'Extract audit PDF text per page with deterministic finding segmentation. Intake enters UNRESOLVED; code refs are report mentions, not verified code.',
-    required: ['pdfBase64'],
-    validate: (a) => {
-      if (typeof a.pdfBase64 !== 'string' || a.pdfBase64.length === 0) throw new Error('pdf_extract: pdfBase64 must be a non-empty base64 string');
-      if (!/^[A-Za-z0-9+/=\s]+$/.test(a.pdfBase64)) throw new Error('pdf_extract: pdfBase64 must be base64');
-    },
-    run: pdfExtractImpl
-  },
-  schedule_monitor: unavailable('schedule_monitor', [
-    'Deliberately not model-callable: monitoring targets require explicit user authorization, which a model tool call cannot supply.',
-    'An in-process scheduler exists (src/agent/scheduler.js: WatchScheduler with file store, locking, backoff, and getAlerts); manage targets through the internal service API, not a model tool.'
-  ]),
   sandbox_exec: {
     name: 'sandbox_exec',
     description: 'Submit a bounded F15 harness run. No isolated executor is configured in this environment: execute requests return EXECUTION_UNAVAILABLE with detection evidence; nothing runs on the host.',

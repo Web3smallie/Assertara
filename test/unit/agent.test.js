@@ -61,11 +61,8 @@ async function runAgentTests() {
     assert.ok(allowance.flags.includes('UNLIMITED_APPROVAL'));
     await assert.rejects(runTool('nope', {}), /unknown tool/);
     await assert.rejects(runTool('decode_tx', { to: '0x123' }), /0x address/);
-    const t = await runTool('schedule_monitor', {});
-    assert.strictEqual(t.status, 'UNAVAILABLE');
-    assert.ok(t.requirements.length > 0, 'Boundary must list integration requirements');
     assert.strictEqual(describeTools().length, Object.keys(TOOLS).length);
-    console.log('✔ Test 2 Passed: Tools execute honestly with validation and boundaries.');
+    console.log('✔ Test 2 Passed: Tools execute honestly with validation.');
   }
 
   // Test 3: Spark adapter builds correct requests and maps errors (stubbed fetch).
@@ -225,22 +222,27 @@ async function runAgentTests() {
     console.log('✔ Test 8 Passed: Report builders emit typed bundles.');
   }
 
-  // Test 9: all 15 features resolve; unavailable ones carry requirements.
+  // Test 9: all 8 retained features resolve; removed ids throw loudly.
   {
-    assert.strictEqual(Object.keys(FEATURES).length, 15, 'All 15 areas must be mapped');
+    const { runExperimental } = require('../../src/agent/features');
+    assert.deepStrictEqual(
+      Object.keys(FEATURES).sort(),
+      ['F1_core', 'F2_advanced', 'F3_experimental', 'F4_translator', 'F5_interceptor', 'F12_localize', 'F13_replay', 'F15_harness'].sort(),
+      'Only the 8 retained areas must be mapped'
+    );
     for (const [id, f] of Object.entries(FEATURES)) {
       assert.ok(['IMPLEMENTED', 'PARTIAL', 'EXPERIMENTAL', 'UNAVAILABLE'].includes(f.status), `${id} needs a status`);
       if (f.status === 'UNAVAILABLE') assert.ok(f.requirements && f.requirements.length > 0, `${id} must list requirements`);
     }
     await assert.rejects(
-      runFeature('F8_scamcall', { turns: [{ text: 'hi' }] }, {}),
+      runFeature('F4_translator', { tx: APPROVE_TX }, {}),
       /model client/,
       'Model-required runners must fail loudly without a model, not fake analysis'
     );
-    const b = await runFeature('F11_video', {}, {});
-    assert.strictEqual(b.status, 'PARTIAL');
-    assert.ok(b.limitations.length > 0, 'Partial boundary must list limitations');
-    console.log('✔ Test 9 Passed: Feature map complete with honest boundaries.');
+    await assert.rejects(runFeature('F6_sentinel', {}, {}), /unknown feature/, 'Removed features must throw, not resolve');
+    await assert.rejects(runFeature('F9_ask', {}, {}), /unknown feature/);
+    assert.strictEqual(runExperimental({}).status, 'GATED');
+    console.log('✔ Test 9 Passed: Feature map complete; removed ids throw.');
   }
 
   // Test 10: F4 translator grounds quotes; mismatches flagged, never rendered as fact.
@@ -277,15 +279,8 @@ async function runAgentTests() {
     console.log('✔ Test 11 Passed: Triage never downgrades deterministic findings.');
   }
 
-  // Test 12: F9 answers cite only real ids; F12 fails closed on altered fields.
+  // Test 12: F12 localization reattaches protected fields and fails closed.
   {
-    const g = new EvidenceGraph('inv_q');
-    const n = g.append({ kind: 'DecodedTx', producer: 'TOOL', payload: {}, created_turn: 1 });
-    const model = { async complete() { return { content: { answer: 'because', citations: [n.id, 'E-404'] } }; } };
-    const qa = await runFeature('F9_ask', { graphExport: g.export(), question: 'why?' }, { model });
-    assert.strictEqual(qa.status, 'PARTIAL');
-    assert.deepStrictEqual(qa.citations, [n.id]);
-    assert.deepStrictEqual(qa.dropped, ['E-404']);
     const finding = { claim: 'Risky approval on 0xabc, see E-001', severity: 'HIGH', contract: '0xabc', functionName: 'approve', parameters: { a: 1 }, supporting: ['E-001'], contradicting: [], recommendedAction: 'Review before signing' };
     const goodT = { async complete() { return { content: { segments: [{ id: 'claim', text: 'Aprobación riesgosa en 0xabc, ver E-001' }, { id: 'recommendedAction', text: 'Revisar antes de firmar' }] } }; } };
     const lok = await runFeature('F12_localize', { finding, targetLang: 'es' }, { model: goodT });
@@ -295,7 +290,7 @@ async function runAgentTests() {
     const badT = { async complete() { return { content: { segments: [{ id: 'claim', text: 'Todo verificado y garantizado' }, { id: 'recommendedAction', text: 'y' }] } }; } };
     const lfail = await runFeature('F12_localize', { finding, targetLang: 'es' }, { model: badT });
     assert.strictEqual(lfail.status, 'FAILED', 'Strengthened claims and dropped values must fail closed');
-    console.log('✔ Test 12 Passed: Q&A citations validated; localization fails closed.');
+    console.log('✔ Test 12 Passed: Localization reattaches protected fields; tampering fails closed.');
   }
 
   // Test 13: F1 core run + F13 replay round-trip.
@@ -313,128 +308,6 @@ async function runAgentTests() {
     console.log('✔ Test 13 Passed: Core loop runs and replays from history.');
   }
 
-  // Test 14: read-only chain readers (stub client) + pure exposure/diff logic.
-  {
-    const { fetchApprovals, computeExposure, readContractMeta, diffWatch } = require('../../src/agent/chain');
-    const OWNER = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
-    const TOKEN = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
-    const SPENDER = '0x942c733fa43900388424a1bf7f94d934b3531b23';
-    const pad = (a) => `0x000000000000000000000000${a.slice(2).toLowerCase()}`;
-    const stub = {
-      async getBlockNumber() { return 23000000n; },
-      async getLogs() {
-        return [{
-          address: TOKEN, topics: ['0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925', pad(OWNER), pad(SPENDER)],
-          transactionHash: '0xabc', blockNumber: 22999999n
-        }];
-      },
-      async readContract() { return 2n ** 256n - 1n; },
-      async getBytecode() { return '0x6080604055'; },
-      async getStorageAt({ slot }) {
-        return slot.endsWith('bbc') ? `0x000000000000000000000000${SPENDER.slice(2).toLowerCase()}` : '0x0000000000000000000000000000000000000000000000000000000000000000';
-      }
-    };
-    const fetched = await fetchApprovals({ owner: OWNER, client: stub });
-    assert.strictEqual(fetched.approvals.length, 1);
-    assert.strictEqual(fetched.approvals[0].spender.toLowerCase(), SPENDER.toLowerCase());
-    assert.strictEqual(fetched.truncated, false);
-    const exposure = computeExposure([...fetched.approvals, { token: TOKEN, spender: SPENDER, allowance: null }]);
-    assert.strictEqual(exposure.unlimitedCount, 1);
-    assert.strictEqual(exposure.unreadableCount, 1);
-    const meta = await readContractMeta({ address: TOKEN, client: stub });
-    assert.strictEqual(meta.hasCode, true);
-    assert.strictEqual(meta.eip1967Implementation.toLowerCase(), SPENDER.toLowerCase());
-    assert.strictEqual(meta.eip1967Admin, null);
-    const diff = diffWatch({ ...meta, eip1967Implementation: null }, meta);
-    assert.strictEqual(diff.changed, true);
-    assert.strictEqual(diff.changes[0].field, 'eip1967Implementation');
-    await assert.rejects(fetchApprovals({ owner: '0x123', client: stub }), /0x address/);
-    console.log('✔ Test 14 Passed: Chain readers fetch, compute, and diff honestly.');
-  }
-
-  // Test 15: F6 sentinel + F7 dossier run on deterministic chain data.
-  {
-    const { runSentinel, runDossier } = require('../../src/agent/features');
-    const OWNER = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
-    const stub = {
-      async getBlockNumber() { return 100n; },
-      async getLogs() { return []; },
-      async readContract() { throw new Error('unused'); },
-      async getBytecode() { return '0x'; },
-      async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; }
-    };
-    const s = await runSentinel({ owner: OWNER }, { client: stub });
-    assert.strictEqual(s.status, 'OK');
-    assert.strictEqual(s.exposure.approvalCount, 0, 'Empty history must report zero, not invent');
-    assert.strictEqual(s.narrative, null, 'No model means no narration, not a fake one');
-    const model = { async complete() { return { content: { summary: 'clean', highestRisk: [] } }; } };
-    const s2 = await runSentinel({ owner: OWNER }, { client: stub, model });
-    assert.strictEqual(s2.narrative.summary, 'clean');
-    const d = await runDossier({ address: OWNER }, { client: stub });
-    assert.strictEqual(d.meta.hasCode, false, 'EOA must report no code');
-    console.log('✔ Test 15 Passed: Sentinel and dossier run deterministically.');
-  }
-
-  // Test 16: F8 transcript lane validates turn indexes and tactic names.
-  {
-    const { runScamCallTranscript } = require('../../src/agent/features');
-    const turns = [{ speaker: 'A', text: 'Hello' }, { speaker: 'B', text: 'Read me your seed phrase now' }];
-    const good = { async complete() { return { content: { annotations: [{ turn: 1, tactics: ['seed-phrase-request', 'urgency-pressure'], why: 'explicit request' }] } }; } };
-    const ok = await runScamCallTranscript({ turns }, { model: good });
-    assert.strictEqual(ok.status, 'OK');
-    assert.strictEqual(ok.timeline.length, 1);
-    const bad = { async complete() { return { content: { annotations: [{ turn: 7, tactics: ['seed-phrase-request'], why: 'x' }, { turn: 0, tactics: ['mind-reading'], why: 'y' }] } }; } };
-    const partial = await runScamCallTranscript({ turns }, { model: bad });
-    assert.strictEqual(partial.status, 'PARTIAL');
-    assert.strictEqual(partial.dropped.length, 2, 'Bad indexes and tactics must be dropped');
-    console.log('✔ Test 16 Passed: Scam-call timeline validates references.');
-  }
-
-  // Test 17: F10 ledger enforces the status machine; VERIFIED_FIXED needs proof.
-  {
-    const { runAuditIntake, runAuditTransition } = require('../../src/agent/features');
-    const intake = runAuditIntake({ findings: [{ id: 'A-1', description: 'reentrancy?' }] });
-    assert.strictEqual(intake.records[0].status, 'UNRESOLVED');
-    const opened = runAuditTransition({ record: intake.records[0], newStatus: 'OPEN' });
-    assert.strictEqual(opened.status, 'OK');
-    const illegal = runAuditTransition({ record: intake.records[0], newStatus: 'VERIFIED_FIXED' });
-    assert.strictEqual(illegal.status, 'REJECTED', 'Skipping states must be rejected');
-    const claimed = runAuditTransition({ record: opened.record, newStatus: 'FIX_CLAIMED' });
-    const noProof = runAuditTransition({ record: claimed.record, newStatus: 'VERIFIED_FIXED' });
-    assert.strictEqual(noProof.status, 'REJECTED', 'Fix claims need passing-test evidence');
-    const proven = runAuditTransition({ record: claimed.record, newStatus: 'VERIFIED_FIXED', testEvidence: { passed: true, logs: 'ok' } });
-    assert.strictEqual(proven.status, 'OK');
-    console.log('✔ Test 17 Passed: Audit ledger enforces verified-fix proof.');
-  }
-
-  // Test 18: F14 watch checks diff honestly; F15 reviews statically with valid refs.
-  {
-    const { runWatchCheck, runRepoReview } = require('../../src/agent/features');
-    const ADDR = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
-    const stubV1 = {
-      async getBytecode() { return '0x11'; },
-      async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; }
-    };
-    const first = await runWatchCheck({ watch: { address: ADDR } }, { client: stubV1 });
-    assert.strictEqual(first.baselineEstablished.bytecodeLength, 1);
-    assert.strictEqual(first.changed, false);
-    const stubV2 = {
-      async getBytecode() { return '0x1122'; },
-      async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; }
-    };
-    const second = await runWatchCheck({ watch: { address: ADDR }, baseline: first.baselineEstablished }, { client: stubV2 });
-    assert.strictEqual(second.changed, true);
-    assert.strictEqual(second.changes[0].field, 'bytecodeLength');
-    const files = [{ path: 'Vault.sol', content: 'line1\nline2\nline3' }];
-    const model = { async complete() { return { content: { hypotheses: [{ claim: 'x', refs: ['Vault.sol:2', 'Nope.sol:9'] }], pocDrafts: ['test draft'], questions: [] } }; } };
-    const review = await runRepoReview({ files, concern: 'reentrancy' }, { model });
-    assert.strictEqual(review.status, 'PARTIAL');
-    assert.deepStrictEqual(review.hypotheses[0].refs, ['Vault.sol:2']);
-    assert.deepStrictEqual(review.droppedRefs, ['Nope.sol:9']);
-    assert.strictEqual(review.pocDrafts[0].status, 'UNEXECUTED', 'Drafts must never imply execution');
-    console.log('✔ Test 18 Passed: Watch diffs and static reviews stay honest.');
-  }
-
   // Test 19: F2 advanced loop with fresh review; F3 stays gated.
   {
     const { runAdvanced, runExperimental } = require('../../src/agent/features');
@@ -450,28 +323,17 @@ async function runAgentTests() {
     console.log('✔ Test 19 Passed: Advanced review adjudicates; experimental stays gated.');
   }
 
-  // Test 20: partial boundaries resolve honestly with limitations.
+  // Test 20: removed legacy tools are unknown; retained catalog is exact.
   {
-    const f11 = await runFeature('F11_video', {}, {});
-    assert.strictEqual(f11.status, 'PARTIAL');
-    assert.ok(f11.limitations.length > 0);
-    await assert.rejects(runTool('chain_history', { owner: '0x123' }), /0x address/, 'Chain tool validates without network');
-    console.log('✔ Test 20 Passed: Video partial-boundary honest; chain tool validates args.');
-  }
-
-  // Test 21: RPC failures surface as errors, never fabricated chain data.
-  {
-    const { fetchApprovals } = require('../../src/agent/chain');
-    const failing = {
-      async getBlockNumber() { throw new Error('RPC Request failed: 403'); },
-      async getLogs() { throw new Error('unreachable'); }
-    };
-    await assert.rejects(
-      fetchApprovals({ owner: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', client: failing }),
-      /403/,
-      'RPC errors must propagate, not become fake approvals'
+    assert.deepStrictEqual(
+      Object.keys(TOOLS).sort(),
+      ['decode_tx', 'compare_fields', 'allowance_analysis', 'segment_concept', 'crop_region', 'ocr_region', 'simulate_tx', 'check_consistency', 'sandbox_exec'].sort(),
+      'Only the 9 retained tools must be registered'
     );
-    console.log('✔ Test 21 Passed: Chain failures surface honestly.');
+    for (const removed of ['contract_meta', 'chain_history', 'pdf_extract', 'transcribe_audio', 'video_analysis', 'schedule_monitor']) {
+      await assert.rejects(runTool(removed, {}), /unknown tool/, `${removed} must be unknown`);
+    }
+    console.log('✔ Test 20 Passed: Legacy tools unknown; retained catalog exact.');
   }
 
   // Test 22: retry-once for 429 / 5xx / timeout — then stop.

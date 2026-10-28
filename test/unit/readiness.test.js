@@ -9,9 +9,9 @@ const { adjudicate, runGates, GATES, FAILED_TOOL_STATUSES } = require('../../src
 const { TOOLS, runTool, describeTools } = require('../../src/agent/toolRegistry');
 
 const EXPECTED_IDS = [
-  'f3.runners', 'core.local', 'exec.harness', 'media.stt', 'media.frames',
-  'media.ocr', 'sim.forge', 'chain.history', 'chain.source',
-  'model.spark', 'model.sam', 'monitor.push', 'web.intel'
+  'f3.runners', 'core.local', 'exec.harness',
+  'media.ocr', 'sim.forge',
+  'model.spark', 'model.sam', 'web.intel'
 ];
 
 function toolNode(g, result, turn = 1) {
@@ -32,7 +32,7 @@ async function runReadinessTests() {
 
   // Test 1: inventory is complete, shaped, and drops nothing silently.
   {
-    assert.deepStrictEqual(listCapabilities().sort(), [...EXPECTED_IDS].sort(), '13 capabilities, no silent removals');
+    assert.deepStrictEqual(listCapabilities().sort(), [...EXPECTED_IDS].sort(), '8 capabilities, no silent removals');
     for (const id of EXPECTED_IDS) {
       const c = CAPABILITIES[id];
       assert.strictEqual(c.id, id);
@@ -48,7 +48,7 @@ async function runReadinessTests() {
         assert.strictEqual(c.classification, 'UNAVAILABLE', `${id}: null entryPoint only for documented gaps`);
       }
     }
-    console.log('✔ Test 1 Passed: 13-capability inventory complete and shaped.');
+    console.log('✔ Test 1 Passed: 8-capability inventory complete and shaped.');
   }
 
   // Test 2: all five readiness statuses, honestly produced.
@@ -99,30 +99,28 @@ async function runReadinessTests() {
     assert.ok(daemonUp.failed.some((f) => f.includes('verified sandbox image')));
     // Unknown capability id throws loudly instead of inventing a record.
     await assert.rejects(checkReadiness('nope.missing'), (e) => e.code === 'UNKNOWN_CAPABILITY');
-    // Live chain probe without a target throws instead of hitting a default.
-    await assert.rejects(checkReadiness('chain.history', { live: true }), (e) => e.code === 'LIVE_NEEDS_TARGET');
+    // Removed capability ids also throw instead of resolving.
+    await assert.rejects(checkReadiness('chain.history'), (e) => e.code === 'UNKNOWN_CAPABILITY');
+    await assert.rejects(checkReadiness('media.stt'), (e) => e.code === 'UNKNOWN_CAPABILITY');
     console.log('✔ Test 3 Passed: Absent deps stay failed; no silent upgrades.');
   }
 
   // Test 4: live execution and test doubles are inseparably labeled.
   {
-    const mocked = await checkReadiness('media.stt', { probe: async () => ({ ok: false, error: 'x' }) });
+    const mocked = await checkReadiness('exec.harness', { probe: async () => ({ ok: false, error: 'x' }) });
     assert.strictEqual(mocked.executedWith, 'mock', 'Injected probe is labeled mock');
-    const probed = await checkReadiness('media.stt');
+    const probed = await checkReadiness('exec.harness');
     assert.strictEqual(probed.executedWith, 'probe', 'Real local probe is labeled probe');
-    const fixture = await checkReadiness('chain.history');
-    assert.strictEqual(fixture.executedWith, 'fixture');
-    assert.ok(fixture.unknown.some((u) => u.includes('reachability')));
     const live = await checkReadiness('core.local');
     assert.strictEqual(live.executedWith, 'live');
-    for (const r of [mocked, probed, fixture, live]) {
+    for (const r of [mocked, probed, live]) {
       assert.ok(!Number.isNaN(Date.parse(r.checkedAt)), 'Every record carries a timestamp');
     }
     // Config-key checks record presence booleans, never key material.
     const spark = await checkReadiness('model.spark', { apiKey: 'sk-should-never-appear-abcdef123456' });
     assert.strictEqual(spark.evidence.configured, true);
     assert.ok(!JSON.stringify(spark).includes('sk-should-never-appear'));
-    console.log('✔ Test 4 Passed: live/fixture/mock/probe labels + timestamps; no key material.');
+    console.log('✔ Test 4 Passed: live/mock/probe labels + timestamps; no key material.');
   }
 
   // Test 5: experimental evidence still cannot verify (gate regression).
@@ -218,7 +216,7 @@ async function runReadinessTests() {
   }
 
   // Test 8: timeouts and unavailable lanes never return success shapes.
-  {
+  { // (harness lane; media lanes removed with their modules)
     const { submitHarnessRun } = require('../../src/agent/harness');
     const unavail = await submitHarnessRun({ kind: 'execute', files: [{ path: 't.js', content: 'x' }], entry: { tool: 'node', args: ['t.js'] } });
     assert.strictEqual(unavail.status, 'EXECUTION_UNAVAILABLE');
@@ -236,17 +234,6 @@ async function runReadinessTests() {
     }
     assert.strictEqual(hanging.status, 'EXECUTION_TIMED_OUT');
     assert.ok(!JSON.stringify(hanging).includes('VULNERABILITY_REPRODUCED'));
-    const { ingestAudio } = require('../../src/agent/audioIngest');
-    const wav = Buffer.alloc(44);
-    wav.write('RIFF', 0); wav.writeUInt32LE(36, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16);
-    wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24);
-    wav.writeUInt32LE(8000, 28); wav.writeUInt16LE(1, 32); wav.writeUInt16LE(8, 34); wav.write('data', 36);
-    const noStt = await ingestAudio({ data: wav });
-    assert.strictEqual(noStt.status, 'TRANSCRIPTION_UNAVAILABLE');
-    const { ingestVideo } = require('../../src/agent/videoIngest');
-    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]), Buffer.alloc(64)]);
-    const noExt = await ingestVideo({ data: mp4 });
-    assert.strictEqual(noExt.status, 'VIDEO_PROCESSING_UNAVAILABLE');
     console.log('✔ Test 8 Passed: Unavailable/timeout lanes carry requirements, never results.');
   }
 
@@ -271,10 +258,6 @@ async function runReadinessTests() {
 
   // Test 10: registries, maps, and boundaries agree.
   {
-    const sm = await runTool('schedule_monitor', {});
-    assert.strictEqual(sm.status, 'UNAVAILABLE');
-    assert.ok(sm.requirements.some((r) => r.includes('scheduler.js')), 'Boundary names the real scheduler');
-    assert.ok(sm.requirements.some((r) => r.includes('authorization')), 'Boundary states the authorization rule');
     for (const t of Object.values(TOOLS)) {
       assert.strictEqual(typeof t.run, 'function', `${t.name} has a run function`);
       assert.ok(/transition|ledger|adjudicat|setstatus|verifyfinding/i.test(t.name) === false, `${t.name} cannot reach verification state`);
@@ -284,12 +267,12 @@ async function runReadinessTests() {
     assert.strictEqual(described.length, Object.keys(TOOLS).length);
     assert.ok(described.every((t) => ['AVAILABLE', 'UNAVAILABLE'].includes(t.status)));
     const { FEATURES } = require('../../src/agent/features');
-    assert.strictEqual(Object.keys(FEATURES).length, 15, 'All 15 areas remain mapped');
+    assert.strictEqual(Object.keys(FEATURES).length, 8, 'All 8 retained areas remain mapped');
     assert.strictEqual(FEATURES.F3_experimental.status, 'EXPERIMENTAL');
     console.log('✔ Test 10 Passed: Tool/feature registries consistent; verification unreachable by tools.');
   }
 
-  // Test 11: static review ≠ reproduction; generated patch ≠ verified fix.
+  // Test 11: static analysis ≠ reproduction; criteria judge honestly.
   {
     const { submitHarnessRun } = require('../../src/agent/harness');
     const statik = await submitHarnessRun({ kind: 'static', files: [{ path: 'V.sol', content: 'x' }] });
@@ -298,98 +281,33 @@ async function runReadinessTests() {
     const n = toolNode(g, { status: 'STATIC_ANALYSIS_ONLY' });
     const r = adjudicate({ id: 'F-S', claim: 'review reproduced the bug dynamically', supporting: [n.id], contradicting: [] }, g, { verdict: 'SUPPORTED', reasons: [] });
     assert.strictEqual(r.status, 'REJECTED', 'Static review cannot satisfy a reproduction claim');
-    const { runRepoReview, runAuditTransition } = require('../../src/agent/features');
-    const review = await runRepoReview({ files: [{ path: 'V.sol', content: 'line1\nline2' }], concern: 'reentrancy' }, {
-      model: { async complete() { return { content: { hypotheses: [{ claim: 'c', refs: ['V.sol:1'] }], pocDrafts: ['draft'], questions: [] } }; } }
-    });
-    assert.ok(review.pocDrafts.every((p) => p.status === 'UNEXECUTED'), 'PoC drafts stay unexecuted text');
-    const noProof = runAuditTransition({ record: { id: 'R-1', status: 'FIX_CLAIMED', history: [] }, newStatus: 'VERIFIED_FIXED' });
-    assert.strictEqual(noProof.status, 'REJECTED', 'VERIFIED_FIXED needs passing-test evidence');
-    const proven = runAuditTransition({ record: { id: 'R-1', status: 'FIX_CLAIMED', history: [] }, newStatus: 'VERIFIED_FIXED', testEvidence: { passed: true, logs: 'suite green' } });
-    assert.strictEqual(proven.status, 'OK', 'Real proof still transitions');
     const { evaluateCriterion } = require('../../src/agent/harness');
     assert.strictEqual(evaluateCriterion({ type: 'exit-code', code: 0 }, { exitCode: 1, stdout: '', stderr: '' }), false);
-    console.log('✔ Test 11 Passed: Static ≠ reproduced; VERIFIED_FIXED keeps its proof bar.');
+    console.log('✔ Test 11 Passed: Static ≠ reproduced; criteria judge honestly.');
   }
 
-  // Test 12: Phase 1–12 regression (all prior lanes intact).
+  // Test 12: retained-lane regression (verifier, harness, localize, replay intact).
   {
     const { adjudicate: adj } = require('../../src/agent/verifier');
     const g = new EvidenceGraph('inv_phase13reg');
     const exp = g.append({ kind: 'ModelReading', producer: 'MODEL', payload: { experimental: true }, created_turn: 1 });
-    assert.strictEqual(adj({ supporting: [exp.id], conflicting: [] }, g, { verdict: 'SUPPORTED', reasons: [] }).status, 'HYPOTHESIS', 'Phase 1 intact');
-    const { WatchScheduler } = require('../../src/agent/scheduler');
-    const fs = require('fs');
-    const path = require('path');
-    const root = path.join(__dirname, '..', '..', 'data', '.test-tmp');
-    fs.mkdirSync(root, { recursive: true });
-    const scratch = fs.mkdtempSync(path.join(root, 'assertara-readiness-'));
-    let now = Date.now();
-    const sched = new WatchScheduler({ dir: scratch, now: () => now });
-    sched.client = {
-      async getBytecode() { return '0x11'; },
-      async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; }
-    };
-    sched.addTarget({ address: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', intervalMs: 5000 });
-    now += 6000;
-    assert.strictEqual((await sched.tickOnce()).checked, 1, 'Phase 2 intact');
-    fs.rmSync(scratch, { recursive: true, force: true });
-    try { fs.rmdirSync(root); } catch { /* non-empty or gone: leave it */ }
-    const { buildPdf } = require('./pdfIngest.test.js');
-    const { ingestAuditPdf, toLedgerIntake } = require('../../src/agent/pdfIngest');
-    const pdf = await ingestAuditPdf({ data: buildPdf([['H-01 Regression check', 'Body.']]) });
-    assert.strictEqual(toLedgerIntake(pdf).findings.length, 1, 'Phase 3 intact');
+    assert.strictEqual(adj({ supporting: [exp.id], conflicting: [] }, g, { verdict: 'SUPPORTED', reasons: [] }).status, 'HYPOTHESIS', 'Verifier intact');
     const { submitHarnessRun: shr } = require('../../src/agent/harness');
-    assert.strictEqual((await shr({ kind: 'static', files: [{ path: 'a.sol', content: 'x' }] })).status, 'STATIC_ANALYSIS_ONLY', 'Phase 4 intact');
-    const { ingestTranscript } = require('../../src/agent/audioIngest');
-    assert.ok(ingestTranscript({ text: 'hi' }).turns.every((x) => x.provenance === 'TRANSCRIPT_PROVIDED'), 'Phase 5 intact');
-    const { discoverApprovals } = require('../../src/agent/chain');
-    const stubChain = {
-      async getBlockNumber() { return 10n; },
-      async getLogs() { return []; },
-      async readContract() { return 0n; }
-    };
-    const hist = await discoverApprovals({
-      owner: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-      tokens: ['0xdAC17F958D2ee523a2206206994597C13D831ec7'],
-      fromBlock: 0n, toBlock: 5n, client: stubChain
-    });
-    assert.strictEqual(hist.coverage.status, 'COMPLETE_WITHIN_REQUESTED_SCOPE', 'Phase 6 intact');
-    const { buildDossier } = require('../../src/agent/dossier');
-    const d = await buildDossier({
-      address: '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045',
-      client: { ...stubChain, async getBytecode() { return '0x'; }, async getStorageAt() { return '0x0000000000000000000000000000000000000000000000000000000000000000'; } },
-      history: false
-    });
-    assert.strictEqual(d.bytecode.hasCode, false, 'Phase 7 intact');
-    const { answerFindingQuestion } = require('../../src/agent/askAbout');
-    const q = await answerFindingQuestion({
-      finding: { id: 'F-R', claim: 'c', supporting: ['E-1'], contradicting: [] },
-      evidence: [{ ref: 'E-1', kind: 'K', summary: 's' }], question: 'q?'
-    }, { model: { async complete() { return { content: { answer: 'a', citations: ['E-1'], answerable: 'full', uncertaintyNote: '', missingEvidence: [] } }; } } });
-    assert.strictEqual(q.status, 'OK', 'Phase 8 intact');
-    const { assessAuditFindings } = require('../../src/agent/auditAssess');
-    const a = await assessAuditFindings({
-      records: [{ id: 'R-1', description: 'd', location: 'p.1', status: 'UNRESOLVED', history: [] }],
-      report: { status: 'OK', findings: [{ index: 0, sourceId: null, severity: null, title: 't', startPage: 1, endPage: 1, quote: 'q', codeRefs: [] }] }
-    });
-    assert.strictEqual(a.assessments[0].verdict, 'UNRESOLVED', 'Phase 9 intact');
-    const { detectVideoCapabilities } = require('../../src/agent/videoIngest');
-    assert.strictEqual((await detectVideoCapabilities()).canProcessVideo, false, 'Phase 10 intact');
+    assert.strictEqual((await shr({ kind: 'static', files: [{ path: 'a.sol', content: 'x' }] })).status, 'STATIC_ANALYSIS_ONLY', 'Harness intact');
     const { localizeAssessment } = require('../../src/agent/localize');
     const loc = await localizeAssessment({
       assessment: { segments: [{ id: 's', text: 'Review 0x942c733fa43900388424a1bf7f94d934b3531b23 carefully (E-001).' }], protected: {} },
       targetLang: 'es'
     }, { model: { async complete() { return { content: { segments: [{ id: 's', text: 'Revise 0x942c733fa43900388424a1bf7f94d934b3531b23 cuidadosamente (E-001).' }] } }; } } });
-    assert.strictEqual(loc.status, 'OK', 'Phase 11 intact');
+    assert.strictEqual(loc.status, 'OK', 'Localize intact');
     const { Recorder, replayRecording, validRecording } = require('../../src/agent/replay');
     const rec = new Recorder({ investigationId: 'inv_reg13', runId: 'run_reg13' });
     rec.append('investigation.started', { data: { featureId: 'F1_core' } });
     rec.append('investigation.stopped', { data: { status: 'COMPLETE' } });
     const exported = rec.export();
-    assert.strictEqual(validRecording(exported).ok, true, 'Phase 12 record intact');
-    assert.strictEqual(replayRecording(exported).status, 'OK', 'Phase 12 replay intact');
-    console.log('✔ Test 12 Passed: Phases 1–12 behavior preserved.');
+    assert.strictEqual(validRecording(exported).ok, true, 'Record intact');
+    assert.strictEqual(replayRecording(exported).status, 'OK', 'Replay intact');
+    console.log('✔ Test 12 Passed: Retained lanes behavior preserved.');
   }
 
   console.log('\nAll Experimental Audit Tests Passed Successfully!\n');

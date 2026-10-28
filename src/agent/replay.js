@@ -65,11 +65,6 @@ const TOOL_NAME_VERSIONS = {
   crop_region: 'agent:imageUtils-crop-v1',
   ocr_region: TOOL_VERSIONS.ocr,
   simulate_tx: TOOL_VERSIONS.simulator,
-  contract_meta: 'agent:chain-readers-v1',
-  chain_history: 'agent:chain-discovery-v1',
-  pdf_extract: 'agent:pdfIngest-v1',
-  transcribe_audio: 'agent:audioIngest-v1',
-  video_analysis: 'agent:videoIngest-v1',
   sandbox_exec: 'agent:harness-v1'
 };
 
