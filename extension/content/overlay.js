@@ -89,6 +89,10 @@
       ? `${decoded.contractName} (${F.shortAddress(decoded.contract)})`
       : F.shortAddress(decoded.contract)));
     facts.appendChild(factRow('Function', decoded.functionName || '—'));
+    facts.appendChild(factRow('Verdict safeguards', F.safeguardText(
+      evidence.verdictSafeguards !== undefined ? evidence.verdictSafeguards : evidence.verdictSafeguard
+    )));
+    facts.appendChild(factRow('Confidence cap', F.confidenceCapText(evidence.confidenceCap)));
     facts.appendChild(factRow('Unlimited approval', decoded.isUnlimitedApproval ? 'YES' : 'No'));
     body.appendChild(facts);
 

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assertara — Execution Control</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23a855f7'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M24 8c-5 0-8 3.5-11 7C10 18.5 8 20 8 24s2 5.5 5 9c3 3.5 6 7 11 7s8-3.5 11-7c3-3.5 5-5 5-9s-2-5.5-5-9c-3-3.5-6-7-11-7z' fill='none' stroke='url(%23g)' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="./styles.css?v=20261101b">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Assertara navigation">
+    <div class="side-brand">
+      <svg class="logo-mark" viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#c084fc"/>
+            <stop offset="0.5" stop-color="#8b5cf6"/>
+            <stop offset="1" stop-color="#22d3ee"/>
+          </linearGradient>
+        </defs>
+        <path d="M32 10c-7 0-11 5-15 10-4 4.5-7 6.5-7 12s3 7.5 7 12c4 5 8 10 15 10s11-5 15-10c4-4.5 7-6.5 7-12s-3-7.5-7-12c-4-5-8-10-15-10z" fill="none" stroke="url(#logoGrad)" stroke-width="7" stroke-linecap="round"/>
+        <path d="M20 44c4-8 8-12 12-16 4 4 8 8 12 16" fill="none" stroke="url(#logoGrad)" stroke-width="7" stroke-linecap="round" opacity="0.85"/>
+      </svg>
+      <div>
+        <div class="side-title">ASSERTARA</div>
+        <div class="side-sub">Execution Control</div>
+      </div>
+    </div>
+    <nav class="side-nav" aria-label="Primary">
+      <button type="button" class="nav-item active" data-view="workspace" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="8" width="16" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="13" r="1.3" fill="currentColor"/><circle cx="15" cy="13" r="1.3" fill="currentColor"/><path d="M9.5 16.5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 8V4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="3.5" r="1" fill="currentColor"/></svg>
+        <span>Agent Workspace</span>
+      </button>
+      <button type="button" class="nav-item" data-view="investigations">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15.8 15.8 20.5 20.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span>Investigation Centre</span>
+      </button>
+      <button type="button" class="nav-item" data-view="history">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8l8-4 8 4-8 4-8-4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M4 12.5l8 4 8-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M4 17l8 4 8-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <span>Execution History</span>
+      </button>
+      <button type="button" class="nav-item" data-view="mandates">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7.5 3v6c0 5-3.5 7.5-7.5 9-4-1.5-7.5-4-7.5-9V6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 12l2 2 4-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Mandates &amp; Policies</span>
+      </button>
+      <button type="button" class="nav-item" data-view="settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+    <div class="side-foot">
+      <span id="sysHealth" class="health-pill unknown"><span class="dot unknown" aria-hidden="true"></span><span id="sysHealthText">Connecting…</span></span>
+      <span id="clock" class="clock">--:--:--</span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- ============ AGENT WORKSPACE ============ -->
+    <section class="view active" id="view-workspace" aria-label="Agent Workspace">
+      <header class="view-head">
+        <div>
+          <h2>Agent Workspace</h2>
+          <p class="view-sub">Live view of autonomous agent activity, Assertara investigation, and execution control.</p>
+        </div>
+        <div class="head-pills">
+          <span class="pill-net" id="netPill" title="Connected network">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="18" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M7.5 7.5l3 7M16.5 7.5l-3 7M8.2 6h7.6" stroke="currentColor" stroke-width="1.7"/></svg>
+            <span id="netPillText">Local (Anvil)</span>
+          </span>
+          <span class="pill-agent" id="agentPill" title="API contact status">
+            <span class="dot unknown" id="agentDot" aria-hidden="true"></span>
+            <span id="agentPillText">Agent Offline</span>
+          </span>
+          <span class="avatar" title="demo-agent">A</span>
+        </div>
+      </header>
+
+      <p id="taskMsg" class="task-msg" role="status"></p>
+
+      <div class="ws-grid">
+        <section class="panel agent-card" aria-label="Autonomous agent">
+          <div class="card-head">
+            <span class="agent-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="13" r="1.3" fill="currentColor"/><circle cx="15" cy="13" r="1.3" fill="currentColor"/><path d="M9.5 16.5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 8V4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="3.5" r="1" fill="currentColor"/></svg>
+            </span>
+            <div>
+              <h3>Autonomous Agent</h3>
+              <p class="agent-id" id="agentName">demo-agent</p>
+            </div>
+            <span class="agent-badge" id="agentBadge">IDLE</span>
+          </div>
+          <ol class="steps" id="agentSteps">
+            <li data-step="received"><span class="step-node" aria-hidden="true"></span><span class="step-label">Received</span></li>
+            <li data-step="planned"><span class="step-node" aria-hidden="true"></span><span class="step-label">Planned</span></li>
+            <li data-step="investigating"><span class="step-node" aria-hidden="true"></span><span class="step-label">Investigating</span></li>
+            <li data-step="executing"><span class="step-node" aria-hidden="true"></span><span class="step-label">Executing</span></li>
+            <li data-step="completed"><span class="step-node" aria-hidden="true"></span><span class="step-label">Completed</span></li>
+          </ol>
+          <div class="prop-tx" id="propTx">
+            <span class="prop-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 2.5l6.5 9.7L12 14.5 5.5 12.2z" fill="currentColor" opacity="0.9"/><path d="M12 15.8l6.5 2.7L12 21.5l-6.5-3z" fill="currentColor" opacity="0.65"/></svg>
+            </span>
+            <div>
+              <div class="prop-title">Proposed Transaction</div>
+              <div class="prop-detail mono" id="propTxDetail">No action proposed yet.</div>
+            </div>
+            <button id="copyTxBtn" type="button" class="icon-btn" title="Copy transaction details" aria-label="Copy transaction details" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15.5v-8a2 2 0 0 1 2-2h8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+            </button>
+          </div>
+          <details class="plan-reason" id="planReasonBox" hidden>
+            <summary>Planner reasoning (agent-stated, never authorization)</summary>
+            <p id="planReasonText"></p>
+          </details>
+        </section>
+
+        <section class="panel inv-card" aria-label="Assertara investigation">
+          <div class="card-head">
+            <span class="inv-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.8 15.8 20.5 20.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <div>
+              <h3>Assertara Investigation</h3>
+              <p class="inv-sub" id="invStatus">Awaiting an agent action.</p>
+            </div>
+          </div>
+          <ul class="checks" id="invChecks">
+            <li data-check="intent"><span class="check-node" aria-hidden="true"></span><div><b>Intent</b><span class="check-sub" id="checkIntentSub">No task submitted</span></div></li>
+            <li data-check="mandate"><span class="check-node" aria-hidden="true"></span><div><b>Mandate</b><span class="check-sub" id="checkMandateSub">No evaluation yet</span></div></li>
+            <li data-check="policy"><span class="check-node" aria-hidden="true"></span><div><b>Policy</b><span class="check-sub" id="checkPolicySub">No evaluation yet</span></div></li>
+          </ul>
+          <div class="decision-panel pending" id="wsDecision">
+            <span class="dec-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 12.5l2.5 2.5 4.5-5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <div>
+              <div class="dec-title" id="wsDecisionTitle">Decision: —</div>
+              <div class="dec-sub" id="wsDecisionSub">Run a demo or submit a supported task to see Assertara decide.</div>
+            </div>
+          </div>
+          <div class="ws-open" id="wsOpenWrap" hidden>
+            <button id="wsOpenInvBtn" type="button" class="btn-ghost">Open in Investigation Centre →</button>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ============ INVESTIGATION CENTRE ============ -->
+    <section class="view" id="view-investigations" aria-label="Investigation Centre" hidden>
+      <header class="view-head">
+        <div>
+          <h2>Investigation Centre</h2>
+          <p class="view-sub">Independent Assertara investigations. Select any investigation to inspect its evidence and decision.</p>
+        </div>
+        <div class="head-controls">
+          <label class="tracelabel" for="tracePicker">Investigation</label>
+          <select id="tracePicker" aria-label="Select investigation trace"></select>
+          <button id="refreshBtn" type="button" class="btn-ghost">Refresh</button>
+        </div>
+      </header>
+      <p id="runStatus" class="task-msg" role="status"></p>
+      <div id="scenarioList" hidden></div>
+      <div id="emptyState" class="empty" hidden>
+        <div class="empty-mark" aria-hidden="true"><svg viewBox="0 0 36 36"><path d="M18 3 31 9v9c0 8-6 12.5-13 15C11 30.5 5 26 5 18V9z" fill="none" stroke="#8b5cf6" stroke-width="2.5" stroke-linejoin="round"/><path d="M12 24 18 11l6 13" stroke="#22d3ee" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="18" cy="11" r="2.4" fill="#22d3ee"/></svg></div>
+        <h2>No investigation selected</h2>
+        <p>Run a demo from the Agent Workspace, or pick a previous investigation from the selector above.</p>
+      </div>
+      <div id="content" hidden>
+        <section class="panel overview" id="overviewPanel" aria-label="Investigation overview">
+          <div class="ov-grid">
+            <div class="ov-decision" id="ovDecision"></div>
+            <div class="ov-tx" id="ovTx"></div>
+            <div class="ov-meta" id="ovMeta"></div>
+          </div>
+        </section>
+        <section class="panel flow" id="flowPanel" aria-label="Live investigation flow">
+          <div class="panelhead">
+            <h2>Investigation flow</h2>
+            <span class="hint">Stages light up from real backend events. Select a stage to inspect its components.</span>
+          </div>
+          <ol id="flowSteps" class="flowsteps"></ol>
+          <div id="flowDetail" class="flowdetail" hidden></div>
+        </section>
+        <div class="duo">
+          <section class="panel ai" id="aiPanel" aria-label="AI intelligence">
+            <div class="panelhead">
+              <h2>AI intelligence</h2>
+              <span id="aiHint" class="hint"></span>
+            </div>
+            <div id="aiBody"><p class="muted">No model activity yet.</p></div>
+          </section>
+          <section class="panel security" id="securityPanel" aria-label="Security analysis">
+            <div class="panelhead">
+              <h2>Security analysis</h2>
+              <span id="secHint" class="hint"></span>
+            </div>
+            <div id="secBody"><p class="muted">Security findings appear as the investigation runs.</p></div>
+          </section>
+        </div>
+        <section class="panel perf" id="perfPanel" aria-label="Performance">
+          <div class="panelhead">
+            <h2>Performance</h2>
+            <span id="perfTotal" class="hint"></span>
+          </div>
+          <div id="perfHead" class="perfhead"></div>
+          <details id="perfDetail" class="perfdetail">
+            <summary>Detailed timing breakdown</summary>
+            <div id="perfBody"></div>
+          </details>
+        </section>
+        <section class="panel inspector" id="inspectorPanel" aria-label="Technical inspector">
+          <div class="panelhead">
+            <h2>Technical inspector</h2>
+            <span id="inspCount" class="hint"></span>
+          </div>
+          <div class="inspectools">
+            <input id="inspSearch" type="search" placeholder="Search components, summaries, errors…" aria-label="Search components">
+            <select id="inspStatus" aria-label="Filter by status">
+              <option value="">All statuses</option>
+              <option value="RUNNING">Running</option>
+              <option value="COMPLETED">Completed</option>
+              <option value="FAILED">Failed</option>
+              <option value="SKIPPED">Skipped</option>
+            </select>
+            <select id="inspGroup" aria-label="Filter by group">
+              <option value="">All groups</option>
+            </select>
+            <button id="inspClear" type="button" class="btn-ghost" hidden>Clear stage filter</button>
+          </div>
+          <div id="componentBoard"></div>
+          <details id="notObserved" class="notobserved" hidden>
+            <summary>Not invoked on this path</summary>
+            <div id="notObservedList"></div>
+          </details>
+          <details id="timelineBox" class="timelinebox">
+            <summary>Raw timeline <span id="tlCount" class="hint"></span></summary>
+            <ol id="timeline" class="timeline"></ol>
+          </details>
+          <details id="evidenceBox" class="evidencebox" open>
+            <summary>Evidence record <span id="evHint" class="hint"></span></summary>
+            <div class="tabs" role="tablist" id="evTabs"></div>
+            <div id="evBody"><p class="muted">Run or select an investigation to inspect its evidence.</p></div>
+          </details>
+        </section>
+      </div>
+    </section>
+
+    <!-- ============ EXECUTION HISTORY ============ -->
+    <section class="view" id="view-history" aria-label="Execution History" hidden>
+      <header class="view-head">
+        <div>
+          <h2>Execution History</h2>
+          <p class="view-sub">Every investigated action, its decision, and its verified on-chain outcome.</p>
+        </div>
+        <div class="head-controls">
+          <button id="historyRefresh" type="button" class="btn-ghost">Refresh</button>
+        </div>
+      </header>
+      <div class="panel">
+        <div class="tablewrap"><table class="histable" id="historyTable">
+          <thead><tr><th>Time</th><th>Task / Transaction</th><th>Decision</th><th>Execution</th><th>Hash</th><th></th></tr></thead>
+          <tbody id="historyBody"><tr><td colspan="6" class="muted">Loading history…</td></tr></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ============ MANDATES & POLICIES ============ -->
+    <section class="view" id="view-mandates" aria-label="Mandates and Policies" hidden>
+      <header class="view-head">
+        <div>
+          <h2>Mandates &amp; Policies</h2>
+          <p class="view-sub">The independently authorized mandate currently enforced. The agent cannot modify its own authorization.</p>
+        </div>
+      </header>
+      <div class="panel"><div id="mandateBody"><p class="muted">Loading mandate…</p></div></div>
+    </section>
+
+    <!-- ============ SETTINGS ============ -->
+    <section class="view" id="view-settings" aria-label="Settings" hidden>
+      <header class="view-head">
+        <div>
+          <h2>Settings</h2>
+          <p class="view-sub">Connection and environment. Read-only: this interface cannot change server configuration.</p>
+        </div>
+      </header>
+      <div class="panel"><div id="settingsBody"><p class="muted">Loading settings…</p></div></div>
+    </section>
+  </main>
+</div>
+
+<span id="healthDot" class="dot unknown" hidden></span>
+<span id="healthText" hidden></span>
+
+<script src="./app.js?v=20261101b"></script>
+<script src="./views.js?v=20261101b"></script>
+</body>
+</html>

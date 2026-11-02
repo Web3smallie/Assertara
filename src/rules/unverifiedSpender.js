@@ -1,4 +1,4 @@
-const { KNOWN_ROUTERS } = require('../utils/abiSignatures');
+const { KNOWN_ROUTERS, matchKnownEntry } = require('../utils/abiSignatures');
 
 function evaluateUnverifiedSpender(decodedTx) {
   const spender = (decodedTx.parameters?.spender || decodedTx.parameters?.operator || '').toLowerCase();
@@ -13,7 +13,10 @@ function evaluateUnverifiedSpender(decodedTx) {
     };
   }
 
-  const isKnownRouter = Boolean(KNOWN_ROUTERS[spender]);
+  // Capability 4 B5: router allowlist is chain-scoped. Without chain
+  // context the legacy unscoped match applies; with it, a mainnet
+  // router address on another chain is unverified.
+  const isKnownRouter = Boolean(matchKnownEntry(KNOWN_ROUTERS, spender, decodedTx.chainId));
   if (!isKnownRouter) {
     return {
       ruleId: 'UNVERIFIED_SPENDER',

@@ -2,15 +2,31 @@
   "manifest_version": 3,
   "name": "Assertara",
   "version": "1.0.0",
-  "description": "Advisory Web3 transaction security: compares a dApp's visible promise against the transaction your wallet is asked to authorize.",
-  "minimum_chrome_version": "109",
+  "description": "Advisory Web3 transaction security: observes pending wallet requests and compares the dApp's visible promise against the transaction awaiting approval.",
+  "minimum_chrome_version": 111,
   "action": {
-    "default_title": "Inspect transaction with Assertara",
+    "default_title": "Assertara transaction protection",
     "default_popup": "popup/popup.html"
   },
   "background": {
     "service_worker": "service-worker.js"
   },
   "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["http://localhost:3001/*"]
+  "host_permissions": ["http://localhost:3001/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["shared/gate.js", "shared/txDigest.js", "content/provider.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["shared/gate.js", "shared/format.js", "content/bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED",
+      "all_frames": false
+    }
+  ]
 }

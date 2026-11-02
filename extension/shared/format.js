@@ -53,6 +53,47 @@
     return 'Reasoning source unknown';
   }
 
+  // Verdict-safeguard display. Accepts the backend's `verdictSafeguards`
+  // array (preferred) or a single legacy `verdictSafeguard` object. Each
+  // entry is { trigger, from, to, reason }. An empty array means none
+  // triggered; a missing/malformed value means unknown — never invented,
+  // never silently treated as "none".
+  function safeguardText(value) {
+    const list = Array.isArray(value) ? value
+      : (value && typeof value === 'object' ? [value] : null);
+    if (list === null) return 'Safeguard information unavailable.';
+    const lines = [];
+    for (const entry of list) {
+      if (entry && typeof entry === 'object' && typeof entry.trigger === 'string' && entry.trigger.length > 0) {
+        lines.push(typeof entry.reason === 'string' && entry.reason.length > 0
+          ? `${entry.trigger}: ${entry.reason}`
+          : `${entry.trigger}: no reason recorded.`);
+      } else {
+        lines.push('Unrecognized safeguard record.');
+      }
+    }
+    if (lines.length === 0) return 'None triggered.';
+    const n = lines.length;
+    return `${n} safeguard${n === 1 ? '' : 's'} triggered: ${lines.join('; ')}`;
+  }
+
+  // Confidence-cap display. The backend sends `confidenceCap` as null when
+  // no cap applied, or { trigger, previousConfidence, cap, reason }. The
+  // original (previous) and final confidence stay distinguishable; values
+  // use the same percentage formatting as the main confidence row.
+  function confidenceCapText(cap) {
+    if (cap === null || cap === undefined) return 'No confidence cap applied.';
+    if (!cap || typeof cap !== 'object' || Array.isArray(cap)
+        || typeof cap.cap !== 'number' || !Number.isFinite(cap.cap)) {
+      return 'Confidence-cap information unavailable.';
+    }
+    const was = (typeof cap.previousConfidence === 'number' && Number.isFinite(cap.previousConfidence))
+      ? ` (was ${formatConfidence(cap.previousConfidence)})`
+      : '';
+    const reason = (typeof cap.reason === 'string' && cap.reason.length > 0) ? cap.reason : 'No reason recorded.';
+    return `Confidence capped at ${formatConfidence(cap.cap)}${was} — ${reason}`;
+  }
+
   function simulationStatus(simulation) {
     const status = simulation && simulation.status;
     if (status === 'EXECUTED') {
@@ -80,6 +121,8 @@
     isValidAddress,
     formatConfidence,
     reasoningOriginLabel,
-    simulationStatus
+    simulationStatus,
+    safeguardText,
+    confidenceCapText
   };
 })();

@@ -1,0 +1,19 @@
+{
+  "id": "e2e-mandate",
+  "version": 1,
+  "issuer": "e2e-operator",
+  "notBefore": "2026-01-01T00:00:00Z",
+  "expiresAt": "2027-01-01T00:00:00Z",
+  "revokedVersions": [],
+  "signerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "senders": ["0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"],
+  "chains": [{ "id": 31337, "rpcUrl": "http://127.0.0.1:18545", "name": "anvil-e2e" }],
+  "recipients": { "allow": ["0x70997970C51812dc3A010C7d01b50e0d17dc79C8"], "deny": [] },
+  "contracts": { "allow": [] },
+  "selectors": { "allow": [] },
+  "allowNativeTransfer": true,
+  "maxNativePerTxWei": "100000000000000000",
+  "approvals": { "allowUnlimited": false, "allowOperatorAll": false, "spenderAllowlist": [] },
+  "spendingLimits": [{ "windowMs": 86400000, "maxNativeWei": "1000000000000000000" }],
+  "reviewRules": [{ "when": "nativeValueAboveWei", "value": "10000000000000000" }]
+}
