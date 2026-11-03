@@ -6,7 +6,7 @@ Assertara investigates a proposed autonomous-agent blockchain transaction with A
 propose -> investigate -> decide -> execute -> manifest -> attest -> publish -> verify
 ```
 
-- SDK on npm: [`assertara`](https://www.npmjs.com/package/assertara) (v0.1.0, zero dependencies, Node 20+)
+- SDK on npm: [`assertara`](https://www.npmjs.com/package/assertara) (v0.1.1, zero dependencies, Node 20+)
 - Onchain proof: see [Onchain proof on Arc Testnet](#onchain-proof-on-arc-testnet)
 
 ## Why it exists

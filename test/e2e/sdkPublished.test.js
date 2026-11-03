@@ -8,7 +8,7 @@ const { spawn, execFileSync } = require('child_process');
 
 // Published-SDK end-to-end: the SAME full lifecycle as
 // sdkProvenance.test.js, but driven exclusively through the
-// assertara@0.1.0 package installed FROM THE NPM REGISTRY (never the
+// assertara@0.1.1 package installed FROM THE NPM REGISTRY (never the
 // local sdk/ source). The agent integration is also exercised with a
 // client constructed from the published package. The ONLY mock is the
 // model transport (canned MATCH verdicts, labeled MOCK).
@@ -22,7 +22,7 @@ const A1 = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 const STRANGER = '0x000000000000000000000000000000000000dEaD';
 const ANVIL_MNEMONIC = 'test test test test test test test test test test test junk';
 const T0 = 1793600000000;
-const PUBLISHED_VERSION = '0.1.0';
+const PUBLISHED_VERSION = '0.1.1';
 
 const FIXTURE_DIR = path.join(__dirname, '..', 'tmp', 'published-sdk');
 const PUB_ROOT = path.join(FIXTURE_DIR, 'node_modules', 'assertara');
@@ -127,7 +127,7 @@ async function runSdkPublishedTests() {
     const resolved = require.resolve(PUB_ROOT);
     assert.ok(resolved.startsWith(FIXTURE_DIR), `suite drives the registry copy (${resolved})`);
     assert.ok(!resolved.startsWith(path.join(repoRoot, 'sdk')), 'suite never loads local sdk/ source');
-    console.log('✔ Test 0 Passed: published 0.1.0 installed from registry; 11/11 files byte-identical.');
+    console.log('✔ Test 0 Passed: published 0.1.1 installed from registry; 11/11 files byte-identical.');
   }
   const { AssertaraClient, isCleanExecution, CODES } = require(PUB_ROOT);
 
