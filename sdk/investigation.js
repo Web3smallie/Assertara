@@ -62,6 +62,26 @@ class Investigation {
   async waitForExecution(opts) {
     return this.client.waitForExecution(this.requestId, opts);
   }
+
+  // Deterministic provenance manifest for this investigation's
+  // decided request (idempotent rebuild).
+  async manifest() {
+    return this.client.buildManifest(this.requestId);
+  }
+
+  // Portable signed-export envelope. Resolves the digest from the
+  // manifest first unless the caller supplies one.
+  async exportPackage(digest) {
+    const d = digest || (await this.manifest()).manifestDigest;
+    return this.client.getExportPackage(d);
+  }
+
+  // Read-only verification of this investigation's export (judge
+  // flow as data). Extra options pass through to verifyAttestation.
+  async verifyAttestation(opts) {
+    const d = (opts && opts.digest) || (await this.manifest()).manifestDigest;
+    return this.client.verifyAttestation({ ...(opts || {}), digest: d });
+  }
 }
 
 module.exports = { Investigation };

@@ -124,6 +124,25 @@ const agentTasks = require('./agentTasks');
 app.post('/api/v1/agent/tasks', agentApiAuth, (req, res) => agentTasks.handleCreateTask(req, res));
 app.get('/api/v1/agent/tasks/:id', agentApiAuth, (req, res) => agentTasks.handleGetTask(req, res));
 
+// Provenance + attestation API (SDK upgrade): thin HTTP adapter over
+// the Phase 1-3 / Step 4-6 services. Manifest/export/verify are
+// agent-key authed and ownership-scoped; ceremony + publish
+// additionally require OPERATOR_SECRET plus explicit server-side
+// opt-in flags (prototype posture — production provenance must use
+// the offline CLI ceremony; see docs/attestation.md).
+const { createProvenanceController, readProvenanceConfig } = require('./controllers/provenanceController');
+const provenanceController = createProvenanceController({
+  store: agentStoreLoad.ok ? agentStore : null,
+  operatorSecret: agentConfig.operatorSecret,
+  config: readProvenanceConfig(process.env)
+});
+app.post('/api/v1/provenance/manifests', agentApiAuth, (req, res) => provenanceController.handleBuildManifest(req, res));
+app.get('/api/v1/provenance/manifests/:digest', agentApiAuth, (req, res) => provenanceController.handleGetManifest(req, res));
+app.get('/api/v1/provenance/exports/:digest', agentApiAuth, (req, res) => provenanceController.handleGetExport(req, res));
+app.post('/api/v1/attestations', agentApiAuth, (req, res) => provenanceController.handleCeremony(req, res));
+app.post('/api/v1/attestations/publish', agentApiAuth, (req, res) => provenanceController.handlePublish(req, res));
+app.post('/api/v1/attestations/verify', agentApiAuth, (req, res) => provenanceController.handleVerify(req, res));
+
 // Serve test fixtures and demo dApp mock pages
 app.use('/demo', express.static(path.resolve(__dirname, '../test/fixtures')));
 

@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const { fromHttp, timeout, notExecutable, digestMismatch, CODES } = require('./errors');
 const { digestTx, digestsEqual, isValidDigest } = require('./digest');
 const { streamSSE } = require('./sse');
+const { canonicalStringify, sha256Hex } = require('./internal/canonicalJson');
 
 const DEFAULT_TIMEOUTS = {
   submit: 30000, // async submit answers 202 immediately
@@ -36,6 +37,26 @@ function sleep(ms) {
 
 function isCleanExecution(execution) {
   return Boolean(execution && execution.outcome === 'EXECUTED');
+}
+
+// Recompute the manifest digest of an export envelope locally and
+// refuse envelopes that fail binding. Mirrors the server/export
+// semantics: canonical bytes of package.manifest, SHA-256.
+function assertExportDigest(exported) {
+  if (!exported || exported.format !== 'assertara-attestation-export-1'
+    || !exported.package || !exported.package.manifest) {
+    throw digestMismatch();
+  }
+  let recomputed;
+  try {
+    recomputed = sha256Hex(canonicalStringify(exported.package.manifest));
+  } catch {
+    throw digestMismatch();
+  }
+  if (recomputed !== exported.manifestDigest) throw digestMismatch();
+  const att = exported.package.attestation;
+  if (!att || !att.body || att.body.manifestDigest !== recomputed) throw digestMismatch();
+  return recomputed;
 }
 
 class AssertaraClient {
@@ -328,6 +349,111 @@ class AssertaraClient {
     return this.requestJson('POST', `/api/v1/agent/requests/${encodeURIComponent(requestId)}/receipts`, {
       body: { txHash },
       timeoutMs: this.timeouts.status
+    });
+  }
+
+  // ---- Provenance + attestation (SDK upgrade) ----
+  //
+  // Thin HTTP access to the provenance pipeline. The SDK verifies
+  // digests locally where it can (vendored canonical JSON + SHA-256)
+  // but performs no signing: ceremony + publication are
+  // operator-authorized server-side operations. The per-call operator
+  // credential is forwarded once and never stored on the client.
+
+  // Build (or fetch, idempotently) the deterministic provenance
+  // manifest for a decided agent request.
+  async buildManifest(requestId) {
+    if (!requestId) throw new Error('buildManifest() requires a requestId.');
+    return this.requestJson('POST', '/api/v1/provenance/manifests', {
+      body: { requestId },
+      timeoutMs: this.timeouts.status
+    });
+  }
+
+  async getManifest(digest) {
+    if (!digest) throw new Error('getManifest() requires a manifest digest.');
+    return this.requestJson('GET', `/api/v1/provenance/manifests/${encodeURIComponent(digest)}`, {
+      timeoutMs: this.timeouts.status
+    });
+  }
+
+  // Portable export envelope ({ format, exportedAt, manifestDigest,
+  // package }) for off-chain publication. The manifest digest is
+  // recomputed locally before return; a mismatch throws instead of
+  // handing the caller untrusted bytes.
+  async getExportPackage(digest) {
+    if (!digest) throw new Error('getExportPackage() requires a manifest digest.');
+    const exported = await this.requestJson('GET', `/api/v1/provenance/exports/${encodeURIComponent(digest)}`, {
+      timeoutMs: this.timeouts.status
+    });
+    assertExportDigest(exported);
+    return exported;
+  }
+
+  // Operator ceremony: preview (confirm !== true) or sign (confirm
+  // === true with expectDigest). Either a full v1 package object or
+  // a digest (server rebuilds the package) may be supplied.
+  // operatorSecret is the REVIEW-release operator credential, read by
+  // the caller from its environment at call time; the SDK keeps no
+  // copy. Agents must never be given this credential.
+  async requestAttestation({ digest, package: pkg, expectDigest, confirm, operatorSecret, allowSuperseded, allowUnverifiedExecution, allowStaleRegistry, minRegistryVersion, maxRegistryAgeDays } = {}) {
+    if (!operatorSecret) throw new Error('requestAttestation() requires the per-call operator credential.');
+    if (!expectDigest) throw new Error('requestAttestation() requires expectDigest.');
+    return this.requestJson('POST', '/api/v1/attestations', {
+      body: {
+        ...(pkg !== undefined ? { package: pkg } : {}),
+        ...(digest !== undefined ? { digest } : {}),
+        expectDigest,
+        ...(confirm !== undefined ? { confirm } : {}),
+        operatorSecret,
+        ...(allowSuperseded !== undefined ? { allowSuperseded } : {}),
+        ...(allowUnverifiedExecution !== undefined ? { allowUnverifiedExecution } : {}),
+        ...(allowStaleRegistry !== undefined ? { allowStaleRegistry } : {}),
+        ...(minRegistryVersion !== undefined ? { minRegistryVersion } : {}),
+        ...(maxRegistryAgeDays !== undefined ? { maxRegistryAgeDays } : {})
+      },
+      timeoutMs: this.timeouts.sign
+    });
+  }
+
+  // Operator publication of a signed package (v2 package object, full
+  // export envelope, or digest) to the configured contract.
+  async publishAttestation({ digest, signedPackage, operatorSecret, confirmations } = {}) {
+    if (!operatorSecret) throw new Error('publishAttestation() requires the per-call operator credential.');
+    return this.requestJson('POST', '/api/v1/attestations/publish', {
+      body: {
+        ...(signedPackage !== undefined ? { signedPackage } : {}),
+        ...(digest !== undefined ? { digest } : {}),
+        operatorSecret,
+        ...(confirmations !== undefined ? { confirmations } : {})
+      },
+      timeoutMs: this.timeouts.sign
+    });
+  }
+
+  // Read-only verification (judge flow as data). Accepts a digest
+  // (server rebuilds the export) or a caller-held export object.
+  // Returns { verdict: 'PASS'|'FAIL', checks, models }. The models
+  // array is derived server-side from the verified manifest — the
+  // SDK displays it, never constructs it. Note: this convenience
+  // call trusts the serving backend + RPC; fully independent
+  // verification remains the judge CLI + public chain data.
+  async verifyAttestation({ digest, exported, registry, trustedRoot, investigation, attester, submitTx, contractVersion, minVersion, maxAgeDays, now } = {}) {
+    return this.requestJson('POST', '/api/v1/attestations/verify', {
+      body: {
+        ...(digest !== undefined ? { digest } : {}),
+        ...(exported !== undefined ? { exported } : {}),
+        ...(registry !== undefined ? { registry } : {}),
+        ...(trustedRoot !== undefined ? { trustedRoot } : {}),
+        ...(investigation !== undefined ? { investigation } : {}),
+        ...(attester !== undefined ? { attester } : {}),
+        ...(submitTx !== undefined ? { submitTx } : {}),
+        ...(contractVersion !== undefined ? { contractVersion } : {}),
+        ...(minVersion !== undefined ? { minVersion } : {}),
+        ...(maxAgeDays !== undefined ? { maxAgeDays } : {}),
+        ...(now !== undefined ? { now } : {})
+      },
+      timeoutMs: this.timeouts.sign
     });
   }
 }

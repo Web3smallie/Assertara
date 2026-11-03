@@ -17,7 +17,7 @@ const ZERO_HASH = `0x${'00'.repeat(32)}`;
 
 const { buildManifest, buildVerificationPackage, verifyPackage } = require('../../src/services/provenanceManifest');
 const A = require('../../src/services/provenanceAttestation');
-const { publishAttestation, PublisherError } = require('../../src/services/attestationPublisher');
+const { publishAttestation, PublisherError, CONTRACT_ABI_V2, deriveModelMetadata } = require('../../src/services/attestationPublisher');
 const { canonicalStringify, sha256Hex } = require('../../src/utils/canonicalJson');
 
 function hex(ch) { return ch.repeat(64); }
@@ -206,12 +206,14 @@ async function runLifecycleTests() {
     fs.mkdirSync(path.join(forgeDir, 'src'), { recursive: true });
     fs.writeFileSync(path.join(forgeDir, 'foundry.toml'), "[profile.default]\nsrc = 'src'\nout = 'out'\nsolc_version = '0.8.20'\n", 'utf8');
     fs.copyFileSync(path.join(repoRoot, 'contracts', 'ProvenanceAttestation.sol'), path.join(forgeDir, 'src', 'ProvenanceAttestation.sol'));
+    fs.copyFileSync(path.join(repoRoot, 'contracts', 'ProvenanceAttestationV2.sol'), path.join(forgeDir, 'src', 'ProvenanceAttestationV2.sol'));
     try {
       execFileSync(foundryBin('forge'), ['build', '--root', forgeDir], { stdio: 'pipe', timeout: 180000 });
     } catch (err) {
       throw new Error(`forge build failed: ${(err && err.stderr) || err.message}`);
     }
     const art = JSON.parse(fs.readFileSync(path.join(forgeDir, 'out', 'ProvenanceAttestation.sol', 'ProvenanceAttestation.json'), 'utf8'));
+    const artV2 = JSON.parse(fs.readFileSync(path.join(forgeDir, 'out', 'ProvenanceAttestationV2.sol', 'ProvenanceAttestationV2.json'), 'utf8'));
     const anvilPort = await freePort();
     const anvilRpc = `http://127.0.0.1:${anvilPort}`;
     const anvil = spawn(foundryBin('anvil'), ['--port', String(anvilPort)], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -225,6 +227,10 @@ async function runLifecycleTests() {
     const deployReceipt = await waitFor(async () => rpc(anvilRpc, 'eth_getTransactionReceipt', [deployHash]), 30000, 'deploy receipt');
     assert.strictEqual(deployReceipt.status, '0x1', 'deploy mined');
     const contract = deployReceipt.contractAddress;
+    const deployHashV2 = await rpc(anvilRpc, 'eth_sendTransaction', [{ from: A0, data: encodeDeployData({ abi: artV2.abi, bytecode: artV2.bytecode.object, args: [] }) }]);
+    const deployReceiptV2 = await waitFor(async () => rpc(anvilRpc, 'eth_getTransactionReceipt', [deployHashV2]), 30000, 'deploy V2 receipt');
+    assert.strictEqual(deployReceiptV2.status, '0x1', 'deploy V2 mined');
+    const contractV2 = deployReceiptV2.contractAddress;
     const fundHash = await rpc(anvilRpc, 'eth_sendTransaction', [{ from: A0, to: pubAddr, value: '0xde0b6b3a7640000' }]);
     const fundReceipt = await waitFor(async () => rpc(anvilRpc, 'eth_getTransactionReceipt', [fundHash]), 30000, 'fund receipt');
     assert.strictEqual(fundReceipt.status, '0x1', 'publisher funded');
@@ -252,8 +258,8 @@ async function runLifecycleTests() {
     assert.strictEqual(rA.modelBitmap, 1, 'ALLOW bitmap: muse only');
     assert.ok(/^0x[0-9a-f]{64}$/.test(rA.txHash), 'submit hash returned');
     const judgeScript = path.join(repoRoot, 'src', 'attestation', 'judge.js');
-    const judgeArgs = (investigation, attester, manifestFile, extra) => [
-      '--rpc', anvilRpc, '--contract', contract,
+    const judgeArgs = (investigation, attester, manifestFile, extra, contractOverride) => [
+      '--rpc', anvilRpc, '--contract', contractOverride || contract,
       '--investigation', investigation, '--attester', attester,
       '--manifest-file', manifestFile,
       '--registry', registryFile, '--trusted-root', rootAddr,
@@ -326,6 +332,52 @@ async function runLifecycleTests() {
       'receipt', 'missing receipt'
     );
     console.log('✔ Judge rejects tampered/wrong-key/stale/swapped/cross-record/missing-receipt cases.');
+
+    // -- 9. V2 lifecycle: dynamic models published + judged. --
+    const pubOptsV2 = (pkg) => ({ ...pubOpts(pkg), contractAddress: contractV2, contractVersion: 2 });
+    const rA2v = await publishAttestation(pubOptsV2(allow.v2));
+    assert.strictEqual(rA2v.ok && rA2v.submitted, true, 'V2 ALLOW publish ok');
+    assert.strictEqual(rA2v.models.length, 2, 'V2 carries two model entries');
+    assert.strictEqual(rA2v.models[0].name, 'museSpark', 'model[0] slot passthrough');
+    assert.strictEqual(rA2v.models[0].modelId, 'muse-spark-1.3', 'model[0] observed id');
+    assert.strictEqual(rA2v.models[1].status, 'skipped', 'model[1] honest skip');
+    assert.ok(rA2v.checks.some((c) => c.name === 'event' && c.ok), 'V2 event verified');
+    const jAv2 = runCli(judgeScript, judgeArgs(allowInv, dayAddr, allowExport, ['--contract-version', '2', '--submit-tx', rA2v.txHash], contractV2));
+    assert.strictEqual(jAv2.code, 0, `judge V2 ALLOW exits 0:\n${jAv2.stdout}\n${jAv2.stderr}`);
+    assert.ok(jAv2.stdout.includes('VERDICT PASS'), 'judge V2 verdict PASS');
+    assert.ok(jAv2.stdout.includes('[INFO] model[0] name=museSpark'), 'judge V2 shows model[0]');
+    assert.ok(jAv2.stdout.includes('status=success contribution=VERDICT_ACCEPTED'), 'judge V2 shows genuine contribution');
+    assert.ok(jAv2.stdout.includes('[INFO] model[1] name=sam'), 'judge V2 shows model[1]');
+    assert.ok(jAv2.stdout.includes('status=skipped contribution=NOT_INVOKED'), 'judge V2 shows honest skip');
+    assert.ok(jAv2.stdout.includes('[PASS] models-match'), 'judge V2 models-match PASS');
+    const rA2vDup = await publishAttestation(pubOptsV2(allow.v2));
+    assert.strictEqual(rA2vDup.duplicate && !rA2vDup.submitted, true, 'V2 identical skips');
+    console.log('✔ V2 ALLOW published with dynamic models; judge V2 VERDICT PASS.');
+
+    // -- 10. Adversarial: direct-to-contract models that contradict the
+    // manifest digest binding. The contract cannot check the linkage
+    // (manifest is off-chain); the judge must refuse.
+    const { encodeFunctionData } = require('viem');
+    const smuggled = deriveModelMetadata(block.v2.manifest);
+    smuggled[1] = { ...smuggled[1], status: 'success', contribution: 'SUCCEEDED' };
+    const smuggleData = encodeFunctionData({
+      abi: CONTRACT_ABI_V2, functionName: 'attest',
+      args: [blockInv, `0x${block.digest}`, 1, 1, ZERO_HASH, dayAddr, smuggled]
+    });
+    const smuggleHash = await rpc(anvilRpc, 'eth_sendTransaction', [{ from: A0, to: contractV2, data: smuggleData }]);
+    const smuggleReceipt = await waitFor(async () => rpc(anvilRpc, 'eth_getTransactionReceipt', [smuggleHash]), 30000, 'smuggle receipt');
+    assert.strictEqual(smuggleReceipt.status, '0x1', 'smuggled record mines (contract cannot check linkage)');
+    const jSmuggle = runCli(judgeScript, judgeArgs(blockInv, dayAddr, blockExport, ['--contract-version', '2'], contractV2));
+    assert.notStrictEqual(jSmuggle.code, 0, 'judge V2 rejects smuggled models');
+    assert.ok(jSmuggle.stdout.includes('VERDICT FAIL'), 'smuggled verdict FAIL');
+    assert.ok(jSmuggle.stdout.includes('models-match'), 'smuggled names models-match');
+    console.log('✔ Judge V2 rejects on-chain models contradicting the manifest.');
+
+    // -- 11. Cross-version: V1 judge against a V2 record fails closed. --
+    const jCross = runCli(judgeScript, judgeArgs(allowInv, dayAddr, allowExport, [], contractV2));
+    assert.notStrictEqual(jCross.code, 0, 'V1 judge on V2 record exits non-zero');
+    assert.ok(jCross.stdout.includes('VERDICT FAIL'), 'cross-version verdict FAIL');
+    console.log('✔ V1 judge refuses V2 records (version must match).');
 
     console.log('\nAll Step 6 attestation-lifecycle e2e scenarios passed.');
   } catch (err) {

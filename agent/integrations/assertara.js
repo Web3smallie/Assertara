@@ -9,7 +9,7 @@
  * approvals, and cannot override any decision.
  */
 
-const { AssertaraClient, isCleanExecution } = require('../../sdk/index');
+const { AssertaraClient, isCleanExecution } = require('assertara');
 
 function createAssertaraIntegration({ client, agentId } = {}) {
   if (!client || typeof client.submit !== 'function') {
@@ -24,12 +24,31 @@ function createAssertaraIntegration({ client, agentId } = {}) {
   // Full guarded flow for ONE action's exact bytes. Resolves (never
   // throws for decisions) to a plain outcome carrying the shared ids:
   // { requestId, traceId, txDigest, decision, reasons, released,
-  //   txHash, execution, findings, timings }. Transport/timeout errors
-  // propagate. Timings are genuine measured client-side durations.
+  //   txHash, execution, findings, timings, provenance }. Transport /
+  // timeout errors propagate. Timings are genuine measured
+  // client-side durations. Provenance capture is best-effort and
+  // additive: a manifest failure never changes the outcome.
   async function executeAction(tx, { purpose, idempotencyKey, evidence, operatorTimeoutMs, onProgress, onEvent } = {}) {
     const emit = typeof onEvent === 'function'
       ? (event, detail, extra) => { try { onEvent(event, detail, extra); } catch { /* observability never breaks the run */ } }
       : () => {};
+    // Deterministic manifest for the decided request (any decision —
+    // BLOCK/REVIEW carry provenance too, with no payment implied).
+    // Failures resolve to null: provenance never breaks the run, and
+    // the agent never touches ceremony or publication (those need the
+    // operator-held credential, which the agent is never given).
+    async function captureProvenance(requestId, traceId) {
+      if (!requestId || typeof client.buildManifest !== 'function') return null;
+      try {
+        const built = await client.buildManifest(requestId);
+        const digest = built && built.manifestDigest;
+        if (typeof digest !== 'string' || !digest) return null;
+        emit('PROVENANCE_RECORDED', `manifestDigest=${digest}`, { requestId, traceId, manifestDigest: digest });
+        return { manifestDigest: digest };
+      } catch {
+        return null;
+      }
+    }
     const timings = { submitMs: null, waitMs: null, executeMs: null };
     let t0 = Date.now();
     const inv = await client.submit({ transaction: tx, purpose, agentId, idempotencyKey, evidence });
@@ -64,17 +83,21 @@ function createAssertaraIntegration({ client, agentId } = {}) {
       const execution = await inv.waitForExecution();
       timings.executeMs = Date.now() - t0;
       emit('EXECUTED', `outcome=${execution ? execution.outcome : 'unknown'} txHash=${signed.txHash}`, { requestId: inv.requestId, traceId: inv.traceId, txHash: signed.txHash });
+      const provenanceReleased = await captureProvenance(inv.requestId, inv.traceId);
       return {
         requestId: inv.requestId, traceId: inv.traceId, txDigest: inv.txDigest || decided.txDigest || null,
         decision: released.decision || 'REVIEW', reasons, released: true,
-        txHash: signed.txHash, receipt: signed.receipt || null, execution, findings, timings
+        txHash: signed.txHash, receipt: signed.receipt || null, execution, findings, timings,
+        provenance: provenanceReleased
       };
     }
     if (decided.decision !== 'ALLOW') {
+      const provenanceStopped = await captureProvenance(inv.requestId, inv.traceId);
       return {
         requestId: inv.requestId, traceId: inv.traceId, txDigest: inv.txDigest || decided.txDigest || null,
         decision: decided.decision, reasons, released: false,
-        txHash: null, receipt: null, execution: null, findings, stopped: true, timings
+        txHash: null, receipt: null, execution: null, findings, stopped: true, timings,
+        provenance: provenanceStopped
       };
     }
     t0 = Date.now();
@@ -82,10 +105,12 @@ function createAssertaraIntegration({ client, agentId } = {}) {
     const execution = await inv.waitForExecution();
     timings.executeMs = Date.now() - t0;
     emit('EXECUTED', `outcome=${execution ? execution.outcome : 'unknown'} txHash=${signed.txHash}`, { requestId: inv.requestId, traceId: inv.traceId, txHash: signed.txHash });
+    const provenanceAllowed = await captureProvenance(inv.requestId, inv.traceId);
     return {
       requestId: inv.requestId, traceId: inv.traceId, txDigest: inv.txDigest || decided.txDigest || null,
       decision: 'ALLOW', reasons, released: false,
-      txHash: signed.txHash, receipt: signed.receipt || null, execution, findings, timings
+      txHash: signed.txHash, receipt: signed.receipt || null, execution, findings, timings,
+      provenance: provenanceAllowed
     };
   }
 

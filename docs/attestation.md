@@ -463,7 +463,10 @@ signer-vs-attester → registry trust + ACTIVE key → decision /
 bitmap / txHash agreement → receipt + event match → BLOCK/REVIEW
 no-payment statement. `--manifest-url` may replace `--manifest-file`
 for remote exports; `--submit-tx` pins the submission receipt,
-otherwise the judge locates the `Attested` log itself.
+otherwise the judge locates the `Attested` log itself by scanning
+backwards from the chain head in small bounded `eth_getLogs` chunks
+(some providers, including Arc, reject wide block ranges). If the log
+is older than the scan window, pass `--submit-tx` explicitly.
 
 Independence statement: the judge reuses Assertara's own
 verification code, so running it trusts the codebase to check
@@ -473,3 +476,58 @@ the EIP-191 signature verifies with any secp256k1 library, and the
 on-chain record is world-readable. "Independent verification" here
 means no access to Assertara's private keys, servers, or internal
 stores is required.
+
+### 11.6 V2 — dynamic on-chain model metadata (prototype)
+
+`contracts/ProvenanceAttestationV2.sol` extends the V1 record with a
+dynamic `ModelProvenance[]` array, emitted in `AttestedWithModels`,
+so a judge opening the transaction on the explorer sees readable
+model entries (slot name, provider, model id, endpoint, status,
+contribution, verdict, input/output digests) instead of only the
+bitmap. The V1 contract, deployment, and publication remain intact
+as historical evidence.
+
+- The publisher (`contractVersion: 2`) derives every entry
+  dynamically from the verified manifest's own model slots
+  (`deriveModelMetadata`); no model, provider, or outcome name is
+  hardcoded anywhere in the derivation, contract, or event flow.
+  Missing text becomes `""` and missing digests become zero —
+  skipped/failed calls stay honestly marked and can never read as
+  success.
+- The `modelBitmap` parameter is preserved as a legacy
+  compatibility field (`deriveCompatBitmap`; unknown slots do not
+  affect it). Per-model truth lives in `models[]`.
+- The manifest digest still commits to the full manifest, so the
+  on-chain metadata is cryptographically bound to the signed
+  evidence; the judge (`--contract-version 2`) re-derives the
+  expected entries and refuses any mismatch. The contract itself
+  only bounds array/string shapes — it cannot check
+  digest-to-metadata linkage, so off-chain judge verification
+  remains mandatory.
+- V1 behavior is unchanged: omit `contractVersion` (or pass `1`)
+  and the publisher/judge use the original ABI.
+
+### 11.7 SDK-upgrade server routes (prototype posture)
+
+The policy server exposes the provenance pipeline over HTTP
+(`src/controllers/provenanceController.js`) for SDK developers:
+manifest build/get, export get, operator ceremony, operator
+publication, and read-only verification (`docs/api-contract.md` §9).
+
+Posture (non-negotiable):
+
+- Ceremony and publication require the `operatorSecret` body field
+  (same credential as REVIEW release) AND explicit server opt-in
+  (`ATTESTATION_SERVER_SIGNING=enabled` /
+  `ATTESTATION_SERVER_PUBLISH=enabled`). Without both, 503.
+- Server-side ceremony holding `ATTESTATION_SIGNING_KEY` is a
+  prototype/demo posture ONLY. Production provenance must use the
+  offline CLI ceremony (§6) with keys that never touch a server.
+- Responses never carry key material (asserted by
+  `test/unit/provenanceRoutes.test.js`).
+- The agent never receives the operator credential and never calls
+  the ceremony/publication methods (asserted by N9 Test 31): the
+  agent cannot self-attest.
+- `POST /api/v1/attestations/verify` is convenience verification
+  (trusts the serving backend + RPC). Independent verification
+  remains the judge CLI (§11.5) plus public chain data.

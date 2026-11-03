@@ -1246,6 +1246,15 @@ async function runAttestationTests() {
   // Step 6 extends the importer allowlist to two verify-only
   // consumers (publisher + judge) with a compensating control below:
   // they may verify, never sign or generate keys.
+  // SDK upgrade: the user-authorized architecture adds ONE
+  // operator-gated HTTP controller (provenanceController.js) plus
+  // thin SDK method names. N9's intent is preserved by narrowing the
+  // rule: no key material outside the gated path, no agent
+  // self-attestation, no signing oracle for arbitrary digests. The
+  // blanket /attest/i ban remains for every other HTTP-zone file.
+  // Demo-A milestone: the operator-run demoA.js harness joins the
+  // importer allowlist with its own compensating control below
+  // (file-held keys only, no embedded key literals, fail-fast gates).
   {
     const roots = ['src', 'agent', 'demo', 'public', 'sdk', 'extension'].map((d) => path.join(REPO, d)).filter((d) => fs.existsSync(d));
     const jsFiles = [];
@@ -1259,11 +1268,11 @@ async function runAttestationTests() {
     };
     roots.forEach(walk);
     assert.ok(jsFiles.length > 50, `N9 walked ${jsFiles.length} product files`);
-    const allowedImporters = new Set(['src/attestation/attest.js', 'src/attestation/keygen.js', 'src/attestation/registry.js', 'src/attestation/judge.js', 'src/services/attestationPublisher.js'].map((f) => path.join(REPO, f)));
+    const allowedImporters = new Set(['src/attestation/attest.js', 'src/attestation/keygen.js', 'src/attestation/registry.js', 'src/attestation/judge.js', 'src/services/attestationPublisher.js', 'src/controllers/provenanceController.js', 'demo/demoA.js'].map((f) => path.join(REPO, f)));
     for (const f of jsFiles) {
       const text = fs.readFileSync(f, 'utf8');
       if (/require\(\s*['"][^'"]*provenanceAttestation['"]\s*\)/.test(text)) {
-        assert.ok(allowedImporters.has(f), `N9: only attestation CLIs may import the core (${path.relative(REPO, f)})`);
+        assert.ok(allowedImporters.has(f), `N9: only attestation CLIs and the gated controller may import the core (${path.relative(REPO, f)})`);
       }
     }
     // Compensating control for the two Step 6 verify-only consumers:
@@ -1279,11 +1288,75 @@ async function runAttestationTests() {
         assert.ok(!text.includes(tok), `N9: Step 6 consumer must not reference ${tok} (${path.relative(REPO, f)})`);
       }
     }
+    // Compensating control for the SDK-upgrade controller: it may run
+    // the operator-gated ceremony, but it must never generate keys,
+    // must never touch role keys outside its two env inputs, and must
+    // keep the operator gate + explicit opt-in flags.
+    {
+      const f = path.join(REPO, 'src/controllers/provenanceController.js');
+      const text = fs.readFileSync(f, 'utf8');
+      for (const tok of ['keygen', 'generateAttestationKey', 'generatePrivateKey', 'REGISTRY_ROOT_KEY', 'SIGNER_PRIVATE_KEY', 'OPERATOR_SIGNING_KEY']) {
+        assert.ok(!text.includes(tok), `N9: controller must not reference ${tok}`);
+      }
+      for (const tok of ['operatorSecret', 'ATTESTATION_SERVER_SIGNING', 'ATTESTATION_SERVER_PUBLISH']) {
+        assert.ok(text.includes(tok), `N9: controller must keep its ${tok} gate`);
+      }
+    }
+    // Compensating control for the Demo A orchestrator: it is an
+    // operator-run demo harness (same class as the attest.js CLI), so
+    // it may drive the ceremony with file-held keys — but keys enter
+    // from files only, no key literal may appear in its source, and
+    // the fail-fast gates must stay in place.
+    {
+      const f = path.join(REPO, 'demo/demoA.js');
+      const text = fs.readFileSync(f, 'utf8');
+      for (const tok of ['--attestation-key-file', '--publisher-key-file', 'readKeyFile']) {
+        assert.ok(text.includes(tok), `N9: demoA must keep file-based key custody (${tok})`);
+      }
+      assert.ok(!/0x[0-9a-fA-F]{64}/.test(text), 'N9: demoA must not embed key-length literals');
+      for (const tok of ['attested !== true', 'VERDICT', 'FAILED at stage']) {
+        assert.ok(text.includes(tok), `N9: demoA must keep its ${tok} fail-fast gate`);
+      }
+    }
     const httpZones = ['src/server.js', 'src/routes', 'src/controllers', 'src/middleware', 'src/sdk', 'src/signer', 'agent', 'demo', 'public', 'sdk', 'extension'];
+    // SDK-upgrade exemptions from the blanket /attest/i ban, each with
+    // its own compensating control below: the route mount (server.js),
+    // the gated controller, thin SDK method names, and the two SDK
+    // callers (agent integration + demo harness).
+    const httpExempt = new Set([
+      'src/server.js',
+      'src/controllers/provenanceController.js',
+      'agent/integrations/assertara.js',
+      'demo/agentDriven.js',
+      'demo/demoA.js'
+    ]);
+    const sdkKeyTokens = ['ATTESTATION_SIGNING_KEY', 'PUBLISHER_TX_KEY', 'REGISTRY_ROOT_KEY', 'SIGNER_PRIVATE_KEY', 'OPERATOR_SIGNING_KEY', 'generateAttestationKey', 'signAttestation', 'attestPackage', 'privateKeyToAccount'];
+    const callerBannedTokens = ['operatorSecret', 'requestAttestation', 'publishAttestation', 'ATTESTATION_SIGNING_KEY', 'PUBLISHER_TX_KEY', 'REGISTRY_ROOT_KEY', 'SIGNER_PRIVATE_KEY'];
     for (const f of jsFiles) {
       const rel = path.relative(REPO, f).replace(/\\/g, '/');
       if (!httpZones.some((z) => rel === z || rel.startsWith(`${z}/`))) continue;
+      if (httpExempt.has(rel)) continue;
+      if (rel === 'sdk' || rel.startsWith('sdk/')) {
+        // SDK surface: method/route names may mention attestation,
+        // but key material and signing entrypoints must never appear
+        // (the allowedImporters loop above already bars core imports).
+        const text = fs.readFileSync(f, 'utf8');
+        for (const tok of sdkKeyTokens) {
+          assert.ok(!text.includes(tok), `N9: sdk must not reference ${tok} (${rel})`);
+        }
+        continue;
+      }
       assert.ok(!/attest/i.test(fs.readFileSync(f, 'utf8')), `N9: no attestation surface in ${rel}`);
+    }
+    // The agent and the demo harness may call the SDK's read-only
+    // provenance methods, but never the operator ceremony/publish
+    // methods and never handle the operator secret or role keys: the
+    // agent cannot self-attest.
+    for (const rel of ['agent/integrations/assertara.js', 'demo/agentDriven.js']) {
+      const text = fs.readFileSync(path.join(REPO, rel), 'utf8');
+      for (const tok of callerBannedTokens) {
+        assert.ok(!text.includes(tok), `N9: ${rel} must not reference ${tok} (no agent self-attestation)`);
+      }
     }
     console.log(`✔ Test 31 Passed: N9 no SDK/agent/HTTP signing exposure (${jsFiles.length} files walked).`);
   }

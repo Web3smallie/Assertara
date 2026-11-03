@@ -5,7 +5,10 @@ const builtinModules = require('module').builtinModules;
 
 // Architectural independence, mechanically enforced:
 // - agent/ imports ONLY: relative requires within agent/, the public
-//   SDK (sdk/), the shared digest helper, and Node builtins.
+//   SDK (the installed `assertara` package, resolved in-repo via the
+//   root self-reference export), the shared digest helper, and Node
+//   builtins. The legacy relative sdk/ path remains tolerated during
+//   migration but new code must use the bare specifier.
 // - ONLY agent/integrations/assertara.js may import the SDK.
 // - NOTHING under agent/ may import src/, demo/, test/, public/,
 //   extension/ (except extension/shared/txDigest.js), or npm packages.
@@ -66,6 +69,13 @@ function runAgentBoundaryTests() {
         assert.fail(`${rel} requires absolute path ${target}`);
       } else {
         const base = target.split('/')[0].replace(/^node:/, '');
+        if (target === 'assertara') {
+          assert.strictEqual(
+            rel, path.join('agent', 'integrations', 'assertara.js'),
+            `only agent/integrations/assertara.js may import the SDK package (violated by ${rel})`
+          );
+          continue;
+        }
         assert.ok(builtins.has(base), `${rel} requires non-builtin package ${target}`);
       }
     }

@@ -41,6 +41,25 @@ artifacts. Exit 2 means the environment is unusable (no key / no Anvil).
    Assertara returns UNCERTAIN. Asserts zero signer calls, no token, and
    unchanged signer consumption.
 
+## Demo B: intent mismatch (agentDriven)
+
+Separate from the four scenarios above, `node demo/agentDriven.js b`
+runs Demo B: user intent says "pay contributor A1 0.005 ETH" while the
+agent output builds a 0.005 ETH transfer to a mandate-denied address,
+with an intent evidence envelope restating the contributor. Inputs are
+scripted for determinism; the investigation is fully live. Expected:
+investigation MISMATCH (model verdict and/or deterministic
+`agentCorroboration` field), mandate denial, combined BLOCK, null
+execution, stopped task, unchanged chain, plus a `demoB-outcome.json`
+bundle in the run directory.
+
+Verification status: mismatch detection confirmed through production
+code (deterministic comparison MISMATCH and a live Spark MISMATCH at
+0.98 on the exact purpose + decoded tx). Full-run e2e/live suites
+(`test/e2e/agentDemos.test.js`, `test/live/agentLive.test.js`) are
+written but not yet executed to green — they need localhost binding
+for the policy app, signer, and Anvil.
+
 ## What is and isn't mocked
 
 - LIVE: planner reasoning, Assertara investigation, signing, Anvil chain.

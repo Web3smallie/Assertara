@@ -712,11 +712,11 @@
     const sessionObjective = lp && lp.requestId === snap.requestId ? lp.objective : null;
     let intentHtml = '';
     if (statements.length > 0) {
-      intentHtml += `<p>Explicit statements from the agent <span class="tier UNTRUSTED">UNTRUSTED</span>:</p>`
+      intentHtml += `<p>Explicit statements from the agent:</p>`
         + statements.slice(0, 6).map((s) => `<div class="quote"><span class="qid">${esc(s.id || 'EI')}</span>${esc(s.quote || s.text || JSON.stringify(s))}</div>`).join('')
         + (statements.length > 6 ? `<p class="hint">+${statements.length - 6} further statement(s) in the evidence record.</p>` : '');
     } else if (sessionObjective) {
-      intentHtml += `<p>Agent-stated purpose <span class="tier UNTRUSTED">UNTRUSTED</span>:</p><div class="quote">${esc(sessionObjective)}</div>`;
+      intentHtml += `<p>Agent-stated purpose:</p><div class="quote">${esc(sessionObjective)}</div>`;
     } else {
       intentHtml += '<p class="muted">Stated intent unavailable — the persisted bundle has not loaded (model-origin runs) and this trace was not started in this session.</p>';
     }

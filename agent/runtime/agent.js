@@ -154,7 +154,8 @@ function createAutonomousAgent(opts = {}) {
         decision: result.decision, reasons: result.reasons || [],
         released: Boolean(result.released), txHash: result.txHash || null,
         receipt: result.receipt || null, execution: result.execution || null,
-        findings: result.findings || null, timings: result.timings || null
+        findings: result.findings || null, timings: result.timings || null,
+        provenance: result.provenance || null
       };
       outcome.actions.push(actionOutcome);
       outcome.decision = result.decision;

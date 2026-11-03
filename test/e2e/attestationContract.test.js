@@ -90,8 +90,16 @@ async function runAttestationContractTests() {
       path.join(forgeDir, 'src', 'ProvenanceAttestation.sol')
     );
     fs.copyFileSync(
+      path.join(__dirname, '..', '..', 'contracts', 'ProvenanceAttestationV2.sol'),
+      path.join(forgeDir, 'src', 'ProvenanceAttestationV2.sol')
+    );
+    fs.copyFileSync(
       path.join(__dirname, '..', 'forge', 'ProvenanceAttestation.t.sol'),
       path.join(forgeDir, 'test', 'ProvenanceAttestation.t.sol')
+    );
+    fs.copyFileSync(
+      path.join(__dirname, '..', 'forge', 'ProvenanceAttestationV2.t.sol'),
+      path.join(forgeDir, 'test', 'ProvenanceAttestationV2.t.sol')
     );
     let forgeTestOut;
     try {
@@ -101,11 +109,12 @@ async function runAttestationContractTests() {
     } catch (err) {
       throw new Error(`forge test failed:\n${(err && err.stdout) || ''}\n${(err && err.stderr) || err.message}`);
     }
-    const suiteLine = (forgeTestOut.match(/(\d+) passed; (\d+) failed; (\d+) skipped/) || []).slice(1).map(Number);
-    assert.strictEqual(suiteLine.length, 3, `forge test summary parseable:\n${forgeTestOut}`);
-    assert.strictEqual(suiteLine[1], 0, 'zero forge failures');
-    assert.ok(suiteLine[0] >= 19, `forge unit tests ran (${suiteLine[0]} passed)`);
-    console.log(`✔ Forge unit tests passed (${suiteLine[0]} passed, 0 failed).`);
+    const suiteLines = [...forgeTestOut.matchAll(/(\d+) passed; (\d+) failed; (\d+) skipped/g)].map((m) => m.slice(1).map(Number));
+    assert.ok(suiteLines.length >= 2, `forge V1+V2 suite summaries parseable:\n${forgeTestOut}`);
+    const totals = suiteLines.reduce((acc, s) => [acc[0] + s[0], acc[1] + s[1], acc[2] + s[2]], [0, 0, 0]);
+    assert.strictEqual(totals[1], 0, 'zero forge failures');
+    assert.ok(totals[0] >= 38, `forge unit tests ran (${totals[0]} passed, V1+V2)`);
+    console.log(`✔ Forge unit tests passed (${totals[0]} passed, 0 failed).`);
 
     // -- 2. Build artifact + deploy to spawned Anvil. --
     try {

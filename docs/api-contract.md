@@ -198,3 +198,62 @@ is the decision source of truth).
 - Investigation progress shows genuine recorded activity only; model
   reasoning content is never streamed or fabricated — structured
   results publish on the terminal record.
+
+## 9. Provenance and attestations (SDK upgrade)
+
+Thin HTTP over the Phase 1-3 / Step 4-6 services. Manifest, export,
+and verify routes take the agent API key and are ownership-scoped
+(foreign reads answer 404). Ceremony and publish additionally
+require the `operatorSecret` body field (same credential as REVIEW
+release) plus explicit server opt-in flags; otherwise 403/503.
+
+### `POST /api/v1/provenance/manifests` - `{ requestId }`
+
+Builds (idempotently) the deterministic manifest for a decided
+request. 404 unknown/foreign request, 409 no persisted
+investigation, 422/409 builder refusal. Returns
+`{ manifest, envelope, manifestDigest }`.
+
+### `GET /api/v1/provenance/manifests/:digest`
+
+Stored manifest + envelope by 64-hex digest. 400 bad digest, 404
+unknown/foreign.
+
+### `GET /api/v1/provenance/exports/:digest`
+
+Portable `assertara-attestation-export-1` envelope (v2 package with
+ceremony attestation). 404 unknown/foreign, 409 `NOT_ATTESTED` when
+no ceremony completion exists for the digest.
+
+### `POST /api/v1/attestations` - operator ceremony
+
+Body: `{ package }` or `{ digest }`, `expectDigest` (required),
+`confirm`, `operatorSecret` (required), optional
+`allowSuperseded`, `allowUnverifiedExecution`, `allowStaleRegistry`,
+`minRegistryVersion`, `maxRegistryAgeDays`. Without `confirm: true`
+returns the preview with `attested: false`. Refusals return
+`attested: false` with a typed `code` (mirrors the CLI result
+object); malformed calls return 4xx. Responses never carry key
+material. Prototype posture: production provenance must use the
+offline CLI ceremony (`docs/attestation.md`).
+
+### `POST /api/v1/attestations/publish` - operator publication
+
+Body: `{ signedPackage }` (v2 package or full export envelope) or
+`{ digest }`, `operatorSecret` (required), optional `confirmations`.
+Returns the publisher result (`ok`, `submitted`, `txHash`, checks).
+Identical resubmission is idempotent (`duplicate: true`,
+`submitted: false`); conflicts refuse. RPC/contract/chain are
+server-configured (no caller override).
+
+### `POST /api/v1/attestations/verify` - read-only judge flow
+
+Body: `{ exported }` or `{ digest }`, optional `registry`,
+`trustedRoot`, `investigation`, `attester`, `submitTx`,
+`contractVersion`, `minVersion`, `maxAgeDays`, `now`. Returns
+`{ verdict: 'PASS'|'FAIL', checks, models }` with the same
+check sequence as `src/attestation/judge.js`. `models` is derived
+server-side from the verified manifest. Caller-supplied
+registry/root are honored; RPC/contract are server-configured.
+Convenience verification (trusts the serving backend + RPC);
+independent verification remains the judge CLI + public chain data.

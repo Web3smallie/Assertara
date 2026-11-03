@@ -41,10 +41,102 @@ const UNKNOWN_ATTESTATION_SELECTOR = (() => {
   return keccak256(toHex('UnknownAttestation()')).slice(2, 10).toLowerCase();
 })();
 
+// True only when the error carries the exact UnknownAttestation()
+// selector, wherever the transport/client nested it. Viem wraps the
+// RPC error (which holds `data`) in a `cause` chain whose top-level
+// message varies by endpoint ("custom error 0x…" on Anvil, "unknown
+// reason" on Arc) — so walk the whole chain plus viem's .walk().
+// Anything else rethrows: fail-closed duplicate protection.
+function isUnknownAttestationRevert(err) {
+  const sel = UNKNOWN_ATTESTATION_SELECTOR.toLowerCase();
+  const textOf = (v) => (typeof v === 'string'
+    ? v
+    : (Array.isArray(v) ? v.filter((x) => typeof x === 'string').join('\n') : ''));
+  const seen = new Set();
+  let cur = err;
+  for (let depth = 0; depth < 10 && cur !== null && cur !== undefined; depth += 1) {
+    if (typeof cur === 'string') return cur.toLowerCase().includes(sel);
+    if (typeof cur !== 'object' || seen.has(cur)) return false;
+    seen.add(cur);
+    for (const k of ['data', 'message', 'shortMessage', 'details', 'metaMessages']) {
+      if (textOf(cur[k]).toLowerCase().includes(sel)) return true;
+    }
+    cur = cur.cause;
+  }
+  if (err && typeof err.walk === 'function') {
+    try {
+      const hit = err.walk((e) => e !== null && e !== undefined && textOf(e.data).toLowerCase().includes(sel));
+      if (hit) return true;
+    } catch {
+      /* fall through to false */
+    }
+  }
+  return false;
+}
+
 const CONTRACT_ABI = [
   'function attest(string investigationId, bytes32 manifestDigest, uint8 modelBitmap, uint8 decision, bytes32 txHash, address attester)',
   'function getAttestation(string investigationId, address attester) view returns (string, bytes32, uint8, uint8, bytes32, address)',
   'event Attested(string indexed investigationId, bytes32 indexed manifestDigest, address indexed attester, uint8 modelBitmap, uint8 decision, bytes32 txHash)'
+];
+
+// V2 ABI (ProvenanceAttestationV2): same core record plus a dynamic
+// per-model metadata array. Tuple components must match the Solidity
+// ModelProvenance struct field order exactly. Written as an ABI
+// object because human-readable ABIs cannot express tuple arrays.
+const MODEL_COMPONENTS = [
+  { name: 'name', type: 'string' },
+  { name: 'provider', type: 'string' },
+  { name: 'modelId', type: 'string' },
+  { name: 'endpoint', type: 'string' },
+  { name: 'status', type: 'string' },
+  { name: 'contribution', type: 'string' },
+  { name: 'verdict', type: 'string' },
+  { name: 'inputDigest', type: 'bytes32' },
+  { name: 'outputDigest', type: 'bytes32' }
+];
+const CONTRACT_ABI_V2 = [
+  {
+    type: 'function', name: 'attest', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'investigationId', type: 'string' },
+      { name: 'manifestDigest', type: 'bytes32' },
+      { name: 'modelBitmap', type: 'uint8' },
+      { name: 'decision', type: 'uint8' },
+      { name: 'txHash', type: 'bytes32' },
+      { name: 'attester', type: 'address' },
+      { name: 'models', type: 'tuple[]', components: MODEL_COMPONENTS }
+    ],
+    outputs: []
+  },
+  {
+    type: 'function', name: 'getAttestation', stateMutability: 'view',
+    inputs: [
+      { name: 'investigationId', type: 'string' },
+      { name: 'attester', type: 'address' }
+    ],
+    outputs: [
+      { name: 'outInvestigationId', type: 'string' },
+      { name: 'outManifestDigest', type: 'bytes32' },
+      { name: 'outModelBitmap', type: 'uint8' },
+      { name: 'outDecision', type: 'uint8' },
+      { name: 'outTxHash', type: 'bytes32' },
+      { name: 'outAttester', type: 'address' },
+      { name: 'outModels', type: 'tuple[]', components: MODEL_COMPONENTS }
+    ]
+  },
+  {
+    type: 'event', name: 'AttestedWithModels',
+    inputs: [
+      { name: 'investigationId', type: 'string', indexed: true },
+      { name: 'manifestDigest', type: 'bytes32', indexed: true },
+      { name: 'attester', type: 'address', indexed: true },
+      { name: 'modelBitmap', type: 'uint8' },
+      { name: 'decision', type: 'uint8' },
+      { name: 'txHash', type: 'bytes32' },
+      { name: 'models', type: 'tuple[]', components: MODEL_COMPONENTS }
+    ]
+  }
 ];
 
 class PublisherError extends Error {
@@ -99,6 +191,80 @@ function deriveModelBitmap(manifest) {
   if (MUSE_SUCCESS_LEVELS.has(muse.contribution)) bitmap |= 1;
   if (SAM_SUCCESS_LEVELS.has(sam.contribution)) bitmap |= 2;
   return bitmap;
+}
+
+// Derive the V2 compat bitmap: same bit semantics as deriveModelBitmap,
+// but tolerant of absent legacy slots (missing slot contributes 0).
+// Unknown/future model slots never affect this legacy field; they are
+// represented in full in the models array instead.
+function deriveCompatBitmap(manifest) {
+  if (!manifest || typeof manifest !== 'object' || !manifest.modelCalls || typeof manifest.modelCalls !== 'object') {
+    fail('PUBLISH_INVALID_PACKAGE', 'manifest.modelCalls: contribution block required');
+  }
+  let bitmap = 0;
+  const muse = manifest.modelCalls.museSpark;
+  if (muse && typeof muse === 'object' && typeof muse.contribution === 'string' && MUSE_SUCCESS_LEVELS.has(muse.contribution)) {
+    bitmap |= 1;
+  }
+  const sam = manifest.modelCalls.sam;
+  if (sam && typeof sam === 'object' && typeof sam.contribution === 'string' && SAM_SUCCESS_LEVELS.has(sam.contribution)) {
+    bitmap |= 2;
+  }
+  return bitmap;
+}
+
+// Derive on-chain model entries from the verified manifest. Fully
+// dynamic: iterates whatever model slots the manifest carries and
+// passes each slot's own status, contribution, and digests through.
+// Unavailable text becomes "" and unavailable digests become zero —
+// never fabricated success. Only manifest schema SHAPE is known here
+// (field names shared by all slots); no model, provider, or outcome
+// name appears anywhere in this function.
+function deriveModelMetadata(manifest) {
+  if (!manifest || typeof manifest !== 'object' || !manifest.modelCalls || typeof manifest.modelCalls !== 'object') {
+    fail('PUBLISH_INVALID_PACKAGE', 'manifest.modelCalls: contribution block required');
+  }
+  const entries = Object.entries(manifest.modelCalls);
+  if (entries.length === 0) {
+    fail('PUBLISH_INVALID_PACKAGE', 'manifest.modelCalls: at least one model entry required');
+  }
+  return entries.map(([slot, s]) => {
+    if (!s || typeof s !== 'object') fail('PUBLISH_INVALID_PACKAGE', `manifest.modelCalls.${slot}: object required`);
+    const rawStatus = (s.status === null || s.status === undefined) ? s.aggregateStatus : s.status;
+    if (typeof rawStatus !== 'string' || rawStatus.length === 0) {
+      fail('PUBLISH_INVALID_PACKAGE', `manifest.modelCalls.${slot}: status string required`);
+    }
+    if (typeof s.contribution !== 'string' || s.contribution.length === 0) {
+      fail('PUBLISH_INVALID_PACKAGE', `manifest.modelCalls.${slot}: contribution string required`);
+    }
+    const str = (v) => (v === null || v === undefined ? '' : String(v));
+    const digest = (v) => (v === null || v === undefined ? ZERO_BYTES32 : toBytes32(v, `manifest.modelCalls.${slot} digest`));
+    return {
+      name: String(slot),
+      provider: str(s.provider),
+      modelId: str((s.observedModel === null || s.observedModel === undefined) ? s.configuredModel : s.observedModel),
+      endpoint: str(s.endpoint),
+      status: rawStatus,
+      contribution: s.contribution,
+      verdict: str(s.modelVerdict),
+      inputDigest: digest(s.inputDigest),
+      outputDigest: digest(s.outputDigest)
+    };
+  });
+}
+
+function sameModels(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  const STR = ['name', 'provider', 'modelId', 'endpoint', 'status', 'contribution', 'verdict'];
+  return a.every((x, i) => {
+    const y = b[i];
+    if (!x || typeof x !== 'object' || !y || typeof y !== 'object') return false;
+    for (const k of STR) {
+      if (String(x[k]) !== String(y[k])) return false;
+    }
+    return String(x.inputDigest).toLowerCase() === String(y.inputDigest).toLowerCase()
+      && String(x.outputDigest).toLowerCase() === String(y.outputDigest).toLowerCase();
+  });
 }
 
 function createViemTransport({ rpcUrl, publisherKey, chainId }) {
@@ -160,6 +326,7 @@ function sameRecord(a, b) {
  * @param {boolean} [o.allowStaleRegistry]  explicit staleness override
  * @param {object} [o.transport]  injected transport (tests); default viem
  * @param {number} [o.now]  injectable clock
+ * @param {number} [o.contractVersion]  1 (default) or 2 (dynamic model metadata)
  */
 async function publishAttestation(o) {
   const opts = o || {};
@@ -204,13 +371,19 @@ async function publishAttestation(o) {
   const attester = await recoverAttestationAddress(pkg.attestation);
   check('attester', true, attester);
 
+  if (opts.contractVersion !== undefined && opts.contractVersion !== 1 && opts.contractVersion !== 2) {
+    fail('PUBLISH_INVALID_INPUT', 'contractVersion: 1 or 2 required');
+  }
+  const v2 = opts.contractVersion === 2;
+
   // -- 3. Decision + bitmap + txHash derivation from verified data. --
   const agentDecision = manifest.decision ? manifest.decision.agent : null;
   if (!Object.prototype.hasOwnProperty.call(DECISION_MAP, agentDecision || '')) {
     fail('PUBLISH_DECISION_UNSUPPORTED', `decision.agent must be ALLOW, BLOCK, or REVIEW (got ${JSON.stringify(agentDecision)})`);
   }
   const decision = DECISION_MAP[agentDecision];
-  const bitmap = deriveModelBitmap(manifest);
+  const bitmap = v2 ? deriveCompatBitmap(manifest) : deriveModelBitmap(manifest);
+  const models = v2 ? deriveModelMetadata(manifest) : null;
   const txHashField = manifest.transaction ? manifest.transaction.transactionHash : null;
   if ((agentDecision === 'BLOCK' || agentDecision === 'REVIEW') && txHashField !== null && txHashField !== undefined) {
     fail('PUBLISH_TXHASH_FORBIDDEN', `${agentDecision} attestation must carry a zero transaction hash`);
@@ -240,7 +413,8 @@ async function publishAttestation(o) {
 
   const { encodeFunctionData, decodeFunctionResult, decodeEventLog, keccak256, toHex } = require('viem');
   const { parseAbi } = require('viem');
-  const abi = parseAbi(CONTRACT_ABI);
+  const abi = v2 ? CONTRACT_ABI_V2 : parseAbi(CONTRACT_ABI);
+  const eventName = v2 ? 'AttestedWithModels' : 'Attested';
   const contract = opts.contractAddress;
   const timeoutMs = opts.confirmTimeoutMs === undefined ? 120000 : opts.confirmTimeoutMs;
   const confirmations = opts.confirmations === undefined ? 1 : opts.confirmations;
@@ -254,7 +428,8 @@ async function publishAttestation(o) {
     const out = decodeFunctionResult({ abi, functionName: 'getAttestation', data: typeof raw === 'string' ? raw : raw.data });
     return {
       investigationId: out[0], manifestDigest: out[1], modelBitmap: Number(out[2]),
-      decision: Number(out[3]), txHash: out[4], attester: out[5]
+      decision: Number(out[3]), txHash: out[4], attester: out[5],
+      ...(v2 ? { models: out[6] } : {})
     };
   };
 
@@ -263,26 +438,28 @@ async function publishAttestation(o) {
   // -- 5. Duplicate pre-check: identical skips submission, conflict refuses. --
   try {
     const existing = await readRecord();
-    if (sameRecord(existing, wanted)) {
+    if (sameRecord(existing, wanted) && (!v2 || sameModels(existing.models, models))) {
       check('duplicate', true, 'identical on-chain record: submission skipped');
       return {
         ok: true, duplicate: true, submitted: false, txHash: null, blockNumber: null,
         contractAddress: contract, investigationId, attester, manifestDigest,
-        modelBitmap: bitmap, decision: agentDecision, checks
+        modelBitmap: bitmap, decision: agentDecision, checks,
+        ...(v2 ? { models } : {})
       };
     }
     fail('PUBLISH_CONFLICT', 'on-chain record for this investigation+attester differs: refusing conflicting submission');
   } catch (err) {
     if (err instanceof PublisherError) throw err;
-    const blob = `${(err && err.message) || ''} ${(err && err.data) || ''} ${typeof err === 'string' ? err : ''}`.toLowerCase();
-    if (!blob.includes(UNKNOWN_ATTESTATION_SELECTOR)) throw err;
+    if (!isUnknownAttestationRevert(err)) throw err;
     check('duplicate', true, 'no on-chain record: proceeding');
   }
 
   // -- 6. Submit + confirm + independently verify. --
   const submitData = encodeFunctionData({
     abi, functionName: 'attest',
-    args: [investigationId, manifestDigest32, bitmap, decision, txHash, attester]
+    args: v2
+      ? [investigationId, manifestDigest32, bitmap, decision, txHash, attester, models]
+      : [investigationId, manifestDigest32, bitmap, decision, txHash, attester]
   });
   let submitHash;
   try {
@@ -309,7 +486,9 @@ async function publishAttestation(o) {
     check('confirmations', true, String(confirmations));
   }
   const back = await readRecord();
-  if (!sameRecord(back, wanted)) fail('PUBLISH_READBACK_MISMATCH', 'on-chain read-back differs from submitted attestation');
+  if (!sameRecord(back, wanted) || (v2 && !sameModels(back.models, models))) {
+    fail('PUBLISH_READBACK_MISMATCH', 'on-chain read-back differs from submitted attestation');
+  }
   check('read-back', true, 'record matches');
   const logs = receipt.logs || [];
   const attestedLogs = [];
@@ -317,12 +496,12 @@ async function publishAttestation(o) {
     if (String(log.address).toLowerCase() !== contract.toLowerCase()) continue;
     try {
       const evt = decodeEventLog({ abi, data: log.data, topics: log.topics });
-      if (evt.eventName === 'Attested') attestedLogs.push({ args: evt.args, topics: log.topics });
+      if (evt.eventName === eventName) attestedLogs.push({ args: evt.args, topics: log.topics });
     } catch {
       continue;
     }
   }
-  if (attestedLogs.length !== 1) fail('PUBLISH_EVENT_MISMATCH', `expected exactly one Attested event, found ${attestedLogs.length}`);
+  if (attestedLogs.length !== 1) fail('PUBLISH_EVENT_MISMATCH', `expected exactly one ${eventName} event, found ${attestedLogs.length}`);
   const evt = attestedLogs[0].args;
   const idTopic = Array.isArray(attestedLogs[0].topics) ? attestedLogs[0].topics[1] : null;
   const expectedIdTopic = keccak256(toHex(investigationId));
@@ -331,21 +510,24 @@ async function publishAttestation(o) {
     || Number(evt.modelBitmap) !== bitmap
     || Number(evt.decision) !== decision
     || String(evt.txHash).toLowerCase() !== txHash.toLowerCase()
+    || (v2 && !sameModels(evt.models, models))
     || (idTopic !== null && idTopic !== undefined && String(idTopic).toLowerCase() !== expectedIdTopic.toLowerCase())) {
-    fail('PUBLISH_EVENT_MISMATCH', 'Attested event contents differ from submitted attestation');
+    fail('PUBLISH_EVENT_MISMATCH', `${eventName} event contents differ from submitted attestation`);
   }
-  check('event', true, 'Attested log matches');
+  check('event', true, `${eventName} log matches`);
 
   return {
     ok: true, duplicate: false, submitted: true, txHash: submitHash,
     blockNumber: typeof receipt.blockNumber === 'bigint' ? Number(receipt.blockNumber) : receipt.blockNumber,
     contractAddress: contract,
     investigationId, attester, manifestDigest, modelBitmap: bitmap,
-    decision: agentDecision, checks
+    decision: agentDecision, checks,
+    ...(v2 ? { models } : {})
   };
 }
 
 module.exports = {
-  PublisherError, deriveModelBitmap, publishAttestation, createViemTransport,
-  CONTRACT_ABI, DECISION_MAP, ZERO_BYTES32
+  PublisherError, deriveModelBitmap, deriveCompatBitmap, deriveModelMetadata, sameModels,
+  publishAttestation, createViemTransport,
+  CONTRACT_ABI, CONTRACT_ABI_V2, DECISION_MAP, ZERO_BYTES32
 };

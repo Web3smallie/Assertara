@@ -116,3 +116,34 @@ proposal replays the stored record instead of re-investigating).
 - The SDK surface provably contains no private-key handling, local
   signing, broadcast, raw-send, force, or override capability
   (`test/unit/guardedWallet.test.js` Test 8 audits every export).
+
+## 9. Provenance (manifests, attestations, verification)
+
+After any decision (BLOCK and REVIEW carry provenance too — with no
+payment implied):
+
+```js
+const { manifestDigest } = await client.buildManifest(requestId); // idempotent
+const exported = await client.getExportPackage(manifestDigest); // digest re-verified locally
+const { verdict, checks, models } = await client.verifyAttestation({ digest: manifestDigest });
+```
+
+`models` is derived server-side from the verified manifest and
+displayed verbatim — the SDK never constructs model identities.
+`verifyAttestation` is a convenience call (trusts the serving backend
++ RPC); fully independent verification remains the judge CLI plus
+public chain data.
+
+Operator calls (human-held credential, per call, never stored,
+never given to the agent):
+
+```js
+const operatorSecret = process.env.OPERATOR_SECRET;
+await client.requestAttestation({ digest, expectDigest: digest, operatorSecret }); // preview
+await client.requestAttestation({ digest, expectDigest: digest, confirm: true, operatorSecret }); // sign
+await client.publishAttestation({ digest, operatorSecret }); // on-chain
+```
+
+`Investigation` conveniences: `inv.manifest()`,
+`inv.exportPackage([digest])`, `inv.verifyAttestation(opts)`.
+Endpoint contract: `docs/api-contract.md` §9.

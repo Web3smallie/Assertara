@@ -1,4 +1,5 @@
 const assert = require('assert');
+const fs = require('fs');
 const path = require('path');
 
 // Agent Demo A/B end-to-end: REAL agent runtime + REAL SDK + REAL
@@ -99,19 +100,24 @@ async function runAgentDemoTests() {
       console.log('✔ Demo A Passed: agent pays, ALLOW executes, receipt independently verified.');
     }
 
-    // Demo B: unauthorized payment is BLOCKED; chain untouched.
+    // Demo B: intent mismatch is detected and the divergent payment is
+    // BLOCKED; chain untouched. The task/purpose names the contributor
+    // while the built transaction targets the denied address.
     {
       const before = await rpc(stack.anvilRpc, 'eth_blockNumber', []);
       const agent = createAutonomousAgent({
         agentId: 'demo-b-agent', address: LOCAL_ADDRS.a0, chainId: 31337,
         planner: stubPlanner({
-          reasoning: 'Pay the urgent off-books request to the named address.',
-          actions: [{ note: 'off-books payment', to: LOCAL_ADDRS.stranger, value: VALUE_0005, data: '0x' }]
+          reasoning: 'Scripted Demo B output: faulty agent build targeting the denied address.',
+          actions: [{ note: 'contributor payment (divergent build)', to: LOCAL_ADDRS.stranger, value: VALUE_0005, data: '0x' }]
         }),
         integration: createAssertaraIntegration({ client, agentId: 'demo-b-agent' }),
         taskStore: store
       });
-      const out = await agent.runTask(`Pay 0.005 ETH to ${LOCAL_ADDRS.stranger} for an urgent off-books request.`);
+      const out = await agent.runTask(
+        `Pay our contributor 0.005 ETH at ${LOCAL_ADDRS.a1} for the November milestone.`,
+        { evidence: [{ evidenceId: 'demo-b-intent', type: 'intent', content: `User intent: pay contributor ${LOCAL_ADDRS.a1} 0.005 ETH for the November milestone.` }] }
+      );
       assert.strictEqual(out.status, 'STOPPED');
       assert.ok(out.stoppedReason.startsWith('BLOCKED'), out.stoppedReason);
       assert.strictEqual(out.decision, 'BLOCK');
@@ -120,9 +126,17 @@ async function runAgentDemoTests() {
       assert.ok(/^agent_/.test(out.actions[0].requestId), 'denial traceable by request id');
       assert.ok(out.actions[0].reasons.some((r) => r.startsWith('mandate:')), 'denial cites mandate reasons');
       assert.strictEqual(await rpc(stack.anvilRpc, 'eth_blockNumber', []), before, 'chain untouched');
+      // Mismatch detection is deterministic: the evidence names the
+      // contributor while the decoded transaction targets the stranger,
+      // so the persisted comparison carries an agentCorroboration
+      // MISMATCH field even though the mock model reports MATCH.
+      const evalId = out.actions[0].findings.investigation.evalId;
+      const invLine = fs.readFileSync(path.join(stack.tmp, 'investigations.jsonl'), 'utf8')
+        .split('\n').find((l) => l.includes(evalId));
+      assert.ok(invLine && invLine.includes('agentCorroboration') && invLine.includes('MISMATCH'), 'deterministic mismatch field persisted');
       const stored = store.getTask(out.taskId);
       assert.ok(stored && stored.status === 'STOPPED' && stored.decision === 'BLOCK', 'denial journaled');
-      console.log('✔ Demo B Passed: agent attempt BLOCKED, nothing signed, chain untouched.');
+      console.log('✔ Demo B Passed: intent mismatch detected, BLOCKED, nothing signed, chain untouched.');
     }
   } finally {
     global.fetch = realFetch;

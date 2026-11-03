@@ -1,0 +1,29 @@
+{
+  "name": "assertara",
+  "version": "0.1.0",
+  "description": "Assertara agent SDK: guarded transaction investigation, execution, and provenance attestation client.",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "client.js",
+    "investigation.js",
+    "guardedWallet.js",
+    "errors.js",
+    "digest.js",
+    "sse.js",
+    "internal/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "keywords": [
+    "assertara",
+    "ai-agents",
+    "transaction-security",
+    "provenance",
+    "attestation"
+  ]
+}

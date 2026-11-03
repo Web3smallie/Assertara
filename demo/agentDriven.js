@@ -1,7 +1,7 @@
 /**
  * Agent-driven demos: the autonomous agent performs Demo A (legitimate
- * payment) and Demo B (unauthorized payment) with a LIVE planner and
- * LIVE investigation.
+ * payment, live planner) and Demo B (intent mismatch via scripted
+ * divergent output) with a LIVE investigation in both.
  *
  * Standalone (default): boots a fresh isolated stack on ephemeral
  * ports, runs the demos, then tears the stack down.
@@ -30,7 +30,7 @@ const { bootStack } = require('./command-stack');
 const { LOCAL_ADDRS } = require('./scenarios');
 const { createAutonomousAgent } = require('../agent/index');
 const { createTaskStore } = require('../agent/runtime/taskStore');
-const { AssertaraClient } = require('../sdk/index');
+const { AssertaraClient } = require('assertara');
 
 const EXPECTED_CHAIN_ID_HEX = '0x7a69'; // 31337 (local Anvil)
 
@@ -137,7 +137,34 @@ async function validateReuseTargets({ policyBase, signerBase, anvilRpc, apiKey }
 }
 
 const DEMO_A_TASK = `Pay our contributor 0.005 ETH at ${LOCAL_ADDRS.a1} for the October milestone.`;
-const DEMO_B_TASK = `Pay 0.005 ETH to ${LOCAL_ADDRS.stranger} for an urgent off-books request.`;
+// Demo B: intent mismatch. The user intent (task text, also submitted
+// as the investigation purpose) names the contributor, while the
+// scripted agent output builds a transaction to the denied address.
+// The evidence envelope restates the contributor intent so the
+// deterministic corroboration check has a testable address.
+const DEMO_B_TASK = `Pay our contributor 0.005 ETH at ${LOCAL_ADDRS.a1} for the November milestone.`;
+const DEMO_B_VALUE = '0x11c37937e08000'; // 0.005 ETH
+const DEMO_B_DIVERGENT_PLAN = {
+  reasoning: 'Scripted Demo B output: faulty agent build targeting the denied address while the stated intent names the contributor.',
+  actions: [{ note: 'contributor payment (divergent build)', to: LOCAL_ADDRS.stranger, value: DEMO_B_VALUE, data: '0x' }]
+};
+const DEMO_B_EVIDENCE = [{
+  evidenceId: 'demo-b-intent',
+  type: 'intent',
+  content: `User intent: pay contributor ${LOCAL_ADDRS.a1} 0.005 ETH for the November milestone.`
+}];
+
+async function anvilBlockNumber(anvilRpc) {
+  const res = await fetch(anvilRpc, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
+  });
+  if (!res.ok) throw new Error(`anvil http ${res.status}`);
+  const body = await res.json();
+  if (body.error) throw new Error(body.error.message || 'anvil rpc error');
+  return body.result;
+}
 
 function printOutcome(label, out) {
   console.log(`\n===== ${label} =====`);
@@ -148,6 +175,7 @@ function printOutcome(label, out) {
     console.log(`-- action ${a.index}: decision=${a.decision} requestId=${a.requestId} traceId=${a.traceId}`);
     for (const r of (a.reasons || []).slice(0, 4)) console.log(`   reason: ${r}`);
     if (a.txHash) console.log(`   txHash=${a.txHash} outcome=${a.execution ? a.execution.outcome : 'pending'}`);
+    if (a.provenance && a.provenance.manifestDigest) console.log(`   manifest=${a.provenance.manifestDigest}`);
   }
   if (out.stoppedReason) console.log(`stopped:  ${out.stoppedReason}`);
 }
@@ -177,38 +205,93 @@ async function main() {
     console.log(`stack: policy=${stack.policyBase} signer=${stack.signerBase}`);
   }
   try {
-    const store = createTaskStore({
-      snapshotFile: `${stack.tmp}/agent-tasks.json`,
-      ledgerFile: `${stack.tmp}/agent-tasks.jsonl`
-    });
-    store.load();
-    const agent = createAutonomousAgent({
-      agentId: 'demo-agent',
-      address: LOCAL_ADDRS.a0,
-      chainId: 31337,
-      modelConfig: {
-        baseUrl: appConfig.metaApiBaseUrl, apiKey: appConfig.modelApiKey,
-        model: appConfig.museModel, timeoutMs: 120000
-      },
-      clientOpts: { policyBase: stack.policyBase, signerBase: stack.signerBase, apiKey: reuse ? reuse.apiKey : null },
-      taskStore: store,
-      onEvent: (e) => console.log(`  [${e.event}] ${e.detail || ''}`)
-    });
     if (runA) {
       console.log('\n--- Demo A: legitimate contributor payment ---');
-      printOutcome('DEMO A', await agent.runTask(DEMO_A_TASK));
+      printOutcome('DEMO A', await runDemoATask({
+        policyBase: stack.policyBase, signerBase: stack.signerBase,
+        tmpDir: stack.tmp, apiKey: reuse ? reuse.apiKey : null,
+        onEvent: (e) => console.log(`  [${e.event}] ${e.detail || ''}`)
+      }));
     }
     if (runB) {
-      console.log('\n--- Demo B: unauthorized payment attempt ---');
-      printOutcome('DEMO B', await agent.runTask(DEMO_B_TASK));
+      console.log('\n--- Demo B: intent mismatch (divergent agent output) ---');
+      const store = createTaskStore({
+        snapshotFile: `${stack.tmp}/agent-tasks.json`,
+        ledgerFile: `${stack.tmp}/agent-tasks.jsonl`
+      });
+      store.load();
+      // Scripted divergent output: the live planner is bypassed for Demo B
+      // so the mismatch inputs are deterministic, while the investigation
+      // stays fully live. The task text (user intent, also submitted as
+      // the purpose) names the contributor; the built transaction targets
+      // the denied address. Nothing here asserts a verdict — the test
+      // suites own all expectations.
+      const agent = createAutonomousAgent({
+        agentId: 'demo-agent',
+        address: LOCAL_ADDRS.a0,
+        chainId: 31337,
+        planner: async () => ({ plan: DEMO_B_DIVERGENT_PLAN, model: 'scripted-divergent-demo-b' }),
+        clientOpts: { policyBase: stack.policyBase, signerBase: stack.signerBase, apiKey: reuse ? reuse.apiKey : null },
+        taskStore: store,
+        onEvent: (e) => console.log(`  [${e.event}] ${e.detail || ''}`)
+      });
+      const blockBefore = await anvilBlockNumber(stack.anvilRpc);
+      const outcome = await agent.runTask(DEMO_B_TASK, { evidence: DEMO_B_EVIDENCE });
+      const blockAfter = await anvilBlockNumber(stack.anvilRpc);
+      printOutcome('DEMO B', outcome);
+      const first = (outcome.actions && outcome.actions[0]) || {};
+      const inv = (first.findings && first.findings.investigation) || {};
+      const bundle = {
+        demo: 'B', task: DEMO_B_TASK,
+        status: outcome.status, stoppedReason: outcome.stoppedReason,
+        decision: outcome.decision, txHash: outcome.txHash, execution: outcome.execution,
+        blockBefore, blockAfter, chainUntouched: blockBefore === blockAfter,
+        requestId: first.requestId || null, traceId: first.traceId || null,
+        evalId: inv.evalId || null, verdict: inv.verdict || null,
+        reasoningOrigin: inv.reasoningOrigin || null,
+        reasons: first.reasons || [],
+        mandateChecks: (first.findings && first.findings.mandateChecks) || null
+      };
+      fs.writeFileSync(`${stack.tmp}/demoB-outcome.json`, JSON.stringify(bundle, null, 2), 'utf8');
+      console.log(`demoB: outcome bundle -> ${stack.tmp}/demoB-outcome.json`);
     }
   } finally {
     stack.kill();
   }
 }
 
+// Demo A as a callable stage (used by the CLI above and by
+// demo/demoA.js). Same agent, task, and flow — returns the outcome
+// instead of printing it.
+async function runDemoATask({ policyBase, signerBase, tmpDir, apiKey, agentId, onEvent } = {}) {
+  const appConfig = require('../src/config/env');
+  const key = appConfig.modelApiKey || '';
+  if (!key || key.startsWith('mock_') || key.includes('your_meta')) {
+    throw new Error('agentDriven demos need a real MODEL_API_KEY (live planner + live investigation).');
+  }
+  const dir = tmpDir || fs.mkdtempSync(path.join(__dirname, 'tmp', 'demoA-'));
+  const store = createTaskStore({
+    snapshotFile: `${dir}/agent-tasks.json`,
+    ledgerFile: `${dir}/agent-tasks.jsonl`
+  });
+  store.load();
+  const agent = createAutonomousAgent({
+    agentId: agentId || 'demo-agent',
+    address: LOCAL_ADDRS.a0,
+    chainId: 31337,
+    modelConfig: {
+      baseUrl: appConfig.metaApiBaseUrl, apiKey: appConfig.modelApiKey,
+      model: appConfig.museModel, timeoutMs: 120000
+    },
+    clientOpts: { policyBase, signerBase, apiKey: apiKey || null },
+    taskStore: store,
+    onEvent: onEvent || (() => {})
+  });
+  return agent.runTask(DEMO_A_TASK);
+}
+
 if (require.main === module) {
   main().catch((err) => { console.error(`agentDriven FAILED: ${err.stack || err.message}`); process.exit(1); });
 }
 
-module.exports = { DEMO_A_TASK, DEMO_B_TASK, parseAgentDrivenArgs, validateReuseTargets };
+module.exports = { DEMO_A_TASK, DEMO_B_TASK, DEMO_B_DIVERGENT_PLAN, DEMO_B_EVIDENCE, parseAgentDrivenArgs, validateReuseTargets, runDemoATask, printOutcome };
