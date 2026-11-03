@@ -171,7 +171,3 @@ new AssertaraClient({
 - Assertara repository: https://github.com/Web3smallie/Assertara
 - npm package: https://www.npmjs.com/package/assertara
 - In-repo docs: `docs/sdk.md` (integration guide), `docs/api-contract.md` (endpoint contract), `docs/attestation.md` (provenance runbook)
-
-## License
-
-ISC. Version 0.1.0.
