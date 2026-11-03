@@ -96,9 +96,10 @@ cast code 0xaa216f7679d1701e8f5121cada4d45aa524c8e30 --rpc-url https://rpc.testn
 | `eval_d50e44a8` | [`0x5b9ef706...6613`](https://explorer.testnet.arc.io/tx/0x5b9ef7067513931f091d98b937f3aec7af2143ef1cc77b7244f1ecc4d51e6613) | 70,408,702 |
 | `eval_6a67bc85` | [`0xfedfd310...79a1`](https://explorer.testnet.arc.io/tx/0xfedfd3101887c748ff348e8deed05dc11cb042f27a5de383b7ee8066543d79a1) | 70,482,011 |
 | `eval_dabc63a9` | [`0xf98bc230...8213`](https://explorer.testnet.arc.io/tx/0xf98bc230a4e1fb032b7ed1266f47748b0850c1042e9ff3791ed556ee7aee8213) | 70,490,682 |
-| `eval_d82eee8f` (latest) | [`0x2c3708a8...c480`](https://explorer.testnet.arc.io/tx/0x2c3708a8cc45b5dd980e7bdf6283925221ea39810dab3680cc3eb30563c6b480) | 70,491,353 |
+| `eval_d82eee8f` | [`0x2c3708a8...c480`](https://explorer.testnet.arc.io/tx/0x2c3708a8cc45b5dd980e7bdf6283925221ea39810dab3680cc3eb30563c6b480) | 70,491,353 |
+| `eval_a5c400c4` (most recent at time of writing) | [`0xb209131b...e80`](https://explorer.testnet.arc.io/tx/0xb209131b3158fbc18ca1d70a325922ef6cdcb7438ebedb5fdb67e99cdae1ce80) | 70,513,712 |
 
-All four were published by attester `0xCde3BBdc21020D220cD592472daDaFBC033eD322`.
+Attester for all of these: `0xCde3BBdc21020D220cD592472daDaFBC033eD322`. More attestations are published over time. The contract page's **Logs** tab on the Explorer lists every one.
 
 ### Verify it yourself
 
