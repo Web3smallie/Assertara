@@ -17,7 +17,7 @@ end. For the pinned wire contract see
 ## 2. Minimal integration (three calls)
 
 ```js
-const { AssertaraClient, createGuardedWallet } = require('assertara-sdk');
+const { AssertaraClient, createGuardedWallet } = require('assertara');
 
 const client = new AssertaraClient({ policyBase, signerBase, apiKey });
 await client.connect();
