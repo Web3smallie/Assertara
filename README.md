@@ -101,6 +101,8 @@ cast code 0xaa216f7679d1701e8f5121cada4d45aa524c8e30 --rpc-url https://rpc.testn
 
 Attester for all of these: `0xCde3BBdc21020D220cD592472daDaFBC033eD322`. More attestations are published over time. The contract page's **Logs** tab on the Explorer lists every one.
 
+*The ETH transfer in these examples is strictly illustrative — see the scope note at the end of this README.*
+
 ### Verify it yourself
 
 You do not need Assertara's CLI, servers or frontend.
@@ -225,4 +227,8 @@ The full list with comments is in `.env.example`.
 - [docs/attestation.md](docs/attestation.md): signing, registry, publication and judge verification
 - [docs/autonomous-agent.md](docs/autonomous-agent.md): the agent execution path
 - [docs/reasoning-architecture.md](docs/reasoning-architecture.md) and [docs/evidence-assembly.md](docs/evidence-assembly.md): how investigations work
+
+## Demo scope note
+
+The transfer examples used in the demo and prototype are strictly illustrative. Assertara is being built to investigate and enforce the full range of autonomous Web3 agent intents and proposed transactions — including trading and swaps, token transfers, airdrop claims, purchases, approvals, staking, bridging, and arbitrary contract interactions. The same pipeline applies to all of them: decode the proposed transaction, compare it against the stated intent, evaluate it against the operator's mandate, execute only through the independent signer when authorized, and publish signed, verifiable evidence of the result.
 
